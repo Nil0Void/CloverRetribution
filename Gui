@@ -1,0 +1,162 @@
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+
+--// STATES
+local DragonEnabled = false
+local FlowerEnabled = false
+local GamepassEnabled = false
+
+local SAFEZONE = Vector3.new(4315, 147, -1116)
+
+--// FOLDERS
+local FlowersFolder = workspace:WaitForChild("Entities"):WaitForChild("Interactions"):WaitForChild("Collectibles"):WaitForChild("Flowers")
+local IgnoreFolder = workspace:WaitForChild("Ignore")
+
+--// GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "StackHub"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 170, 0, 200)
+Frame.Position = UDim2.new(0.5, -85, 0.5, -100)
+Frame.BackgroundTransparency = 0.25
+Frame.Parent = ScreenGui
+
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0, 6)
+Layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+Layout.Parent = Frame
+
+
+
+local function createButton(icon)
+	local btn = Instance.new("ImageButton")
+	btn.Size = UDim2.new(0, 55, 0, 45)
+	btn.BackgroundTransparency = 0.3
+	btn.Image = icon
+	btn.ImageColor3 = Color3.fromRGB(255, 80, 80)
+	btn.Parent = Frame
+	return btn
+end
+
+local DragonBtn = createButton("rbxassetid://6031075938")
+local FlowerBtn = createButton("rbxassetid://6035107922")
+local GPBtn = createButton("rbxassetid://6031225815")
+
+DragonBtn.MouseButton1Click:Connect(function()
+	DragonEnabled = not DragonEnabled
+	DragonBtn.ImageColor3 = DragonEnabled and Color3.fromRGB(0,255,120) or Color3.fromRGB(255,80,80)
+end)
+
+FlowerBtn.MouseButton1Click:Connect(function()
+	FlowerEnabled = not FlowerEnabled
+	FlowerBtn.ImageColor3 = FlowerEnabled and Color3.fromRGB(0,255,120) or Color3.fromRGB(255,80,80)
+end)
+
+GPBtn.MouseButton1Click:Connect(function()
+	GamepassEnabled = not GamepassEnabled
+	GPBtn.ImageColor3 = GamepassEnabled and Color3.fromRGB(0,170,255) or Color3.fromRGB(255,80,80)
+end)
+
+
+
+local function getRoot()
+	local char = player.Character
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function findPrompt(obj)
+	for _, v in ipairs(obj:GetDescendants()) do
+		if v:IsA("ProximityPrompt") then
+			return v
+		end
+	end
+end
+
+
+
+task.spawn(function()
+	while task.wait(1) do
+
+		local root = getRoot()
+		if not root then continue end
+
+		-- 🟠 DRAGON BALL
+		if DragonEnabled then
+			local found = false
+
+			for _, obj in ipairs(IgnoreFolder:GetChildren()) do
+				if string.match(obj.Name, "^Dragon Ball %d+$") then
+					found = true
+
+					local part = obj:FindFirstChildWhichIsA("BasePart", true)
+					if part then
+						root.CFrame = part.CFrame + Vector3.new(0,3,0)
+						task.wait(0.1)
+					end
+				end
+			end
+
+			-- safer: only teleport if nothing exists
+			if not found then
+				task.wait(0.2)
+				root.CFrame = CFrame.new(SAFEZONE)
+			end
+		end
+
+		-- 🌸 FLOWERS
+		if FlowerEnabled then
+			for _, flower in ipairs(FlowersFolder:GetChildren()) do
+				if not FlowerEnabled then break end
+
+				local part = flower:FindFirstChildWhichIsA("BasePart", true)
+				local prompt = findPrompt(flower)
+
+				if part and prompt then
+					root.CFrame = part.CFrame + Vector3.new(0,3,0)
+
+					-- non-blocking spam (softened)
+					for i = 1, 5 do
+						if not FlowerEnabled then break end
+						fireproximityprompt(prompt)
+						task.wait(0.03)
+					end
+
+					task.wait(0.1)
+				end
+			end
+
+			task.wait(0.2)
+			root.CFrame = CFrame.new(SAFEZONE)
+		end
+
+		-- 💰 GAMEPASS
+		if GamepassEnabled then
+			local entity
+
+			for _, e in ipairs(workspace.Entities:GetChildren()) do
+				local eroot = e:FindFirstChild("HumanoidRootPart")
+
+				if eroot and (eroot.Position - root.Position).Magnitude < 6 then
+					entity = e
+					break
+				end
+			end
+
+			if entity then
+				if not entity:FindFirstChild("Weapon") then
+					game.ReplicatedStorage.ReplicatedPackage.Remotes.action:FireServer("EquipWeapon")
+				end
+
+				if not entity:FindFirstChild("Grimoire") then
+					game.ReplicatedStorage.ReplicatedPackage.Remotes.action:FireServer("Book")
+				end
+			end
+		end
+
+	end
+end)
