@@ -16,23 +16,48 @@ gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 180, 0, 80)
+frame.Size = UDim2.new(0, 180, 0, 140)
 frame.Position = UDim2.new(0.5, -90, 0.5, -40)
 frame.Parent = gui
 
 local button = Instance.new("TextButton")
-button.Size = UDim2.new(1, -10, 1, -10)
+button.Size = UDim2.new(1, -10, 0, 60)
 button.Position = UDim2.new(0, 5, 0, 5)
 button.Text = "Auto Equip: OFF"
 button.Parent = frame
 
+local spellButton = Instance.new("TextButton")
+spellButton.Size = UDim2.new(1, -10, 0, 60)
+spellButton.Position = UDim2.new(0, 5, 0, 75)
+spellButton.Text = "Auto Spells: OFF"
+spellButton.Parent = frame
+
 -- Toggle
 local enabled = false
+local spellEnabled = false
 
 button.MouseButton1Click:Connect(function()
     enabled = not enabled
     button.Text = enabled and "Auto Equip: ON" or "Auto Equip: OFF"
 end)
+
+spellButton.MouseButton1Click:Connect(function()
+    spellEnabled = not spellEnabled
+    spellButton.Text = spellEnabled and "Auto Spells: ON" or "Auto Spells: OFF"
+end)
+
+local function getSpellTools()
+    local backpack = player:WaitForChild("Backpack")
+    local spells = {}
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
+            table.insert(spells, tool)
+        end
+    end
+
+    return spells
+end
 
 -- Draggable (PC + Mobile)
 local dragging = false
@@ -93,6 +118,26 @@ local function getEntity()
 end
 
 -- Auto Equip Loop
+task.spawn(function()
+    while task.wait(1) do
+        if not spellEnabled then
+            continue
+        end
+
+        local spells = getSpellTools()
+
+        for _, tool in ipairs(spells) do
+            -- BEST PRACTICE (client side only):
+            -- equip locally if allowed
+            local character = player.Character
+            if character and tool.Parent == player.Backpack then
+                tool.Parent = character
+                task.wait(0.1)
+            end
+        end
+    end
+end)
+
 task.spawn(function()
     while task.wait(1) do
         if not enabled then
