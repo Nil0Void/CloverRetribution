@@ -1,0 +1,181 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local SAFEZONE = Vector3.new(4315, 147, -1116)
+local FLOWER_DELAY = 0.2
+local LOOP_DELAY = 50
+
+local FlowersFolder = workspace.Entities.Interactions.Collectibles.Flowers
+
+-- GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FlowerFarmMobile"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 220, 0, 70)
+Frame.Position = UDim2.new(0, 20, 0, 200)
+Frame.Parent = ScreenGui
+
+local Toggle = Instance.new("TextButton")
+Toggle.Size = UDim2.new(1, -10, 1, -10)
+Toggle.Position = UDim2.new(0, 5, 0, 5)
+Toggle.Text = "🌸 Flower Farm: OFF"
+Toggle.TextScaled = true
+Toggle.Parent = Frame
+
+-- Draggable
+local dragging = false
+local dragInput
+local dragStart
+local startPos
+
+local function update(input)
+	local delta = input.Position - dragStart
+	Frame.Position = UDim2.new(
+		startPos.X.Scale,
+		startPos.X.Offset + delta.X,
+		startPos.Y.Scale,
+		startPos.Y.Offset + delta.Y
+	)
+end
+
+Frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+	or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = Frame.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+Frame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement
+	or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		update(input)
+	end
+end)
+
+local Enabled = false
+
+Toggle.MouseButton1Click:Connect(function()
+	Enabled = not Enabled
+
+	if Enabled then
+		Toggle.Text = "🌸 Flower Farm: ON"
+	else
+		Toggle.Text = "🌸 Flower Farm: OFF"
+	end
+end)
+
+local function getRoot()
+	local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	return Character:WaitForChild("HumanoidRootPart")
+end
+
+local function getPrompt(obj)
+	for _, v in ipairs(obj:GetDescendants()) do
+		if v:IsA("ProximityPrompt") then
+			return v
+		end
+	end
+end
+
+local function getPart(obj)
+	if obj:IsA("BasePart") then
+		return obj
+	end
+
+	for _, v in ipairs(obj:GetDescendants()) do
+		if v:IsA("BasePart") then
+			return v
+		end
+	end
+end
+
+task.spawn(function()
+	while true do
+		if Enabled then
+			local HRP = getRoot()
+
+			local flowers = {}
+
+			for _, v in ipairs(FlowersFolder:GetDescendants()) do
+				local prompt = getPrompt(v)
+
+				if prompt then
+					table.insert(flowers, v)
+				end
+			end
+
+			table.sort(flowers, function(a, b)
+				local aLily = a.Name:lower():find("lily") ~= nil
+				local bLily = b.Name:lower():find("lily") ~= nil
+
+				if aLily ~= bLily then
+					return aLily
+				end
+
+				return a.Name < b.Name
+			end)
+
+			local visited = {}
+
+			for _, flower in ipairs(flowers) do
+				if not Enabled then
+					break
+				end
+
+				if not visited[flower] then
+					visited[flower] = true
+
+					local part = getPart(flower)
+					local prompt = getPrompt(flower)
+
+					if part then
+						HRP.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+
+						local startTime = tick()
+
+						while Enabled and tick() - startTime < FLOWER_DELAY do
+							if prompt and prompt.Parent then
+								fireproximityprompt(prompt)
+							end
+
+							task.wait()
+						end
+					end
+				end
+			end
+
+			-- Return to safe zone AFTER sweep
+			if Enabled then
+				HRP.CFrame = CFrame.new(SAFEZONE)
+			end
+
+			local elapsed = 0
+
+			while Enabled and elapsed < LOOP_DELAY do
+				task.wait(0.1)
+				elapsed += 0.1
+			end
+		else
+			task.wait(0.1)
+		end
+	end
+end)
