@@ -1,0 +1,162 @@
+--// Dragon Ball Auto Collector
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local ENABLED = false
+local SAFE_POSITION = Vector3.new(4315, 147, -1116)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DragonBallCollector"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = game.CoreGui
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 200, 0, 100)
+Frame.Position = UDim2.new(0.5, -100, 0.5, -50)
+Frame.BackgroundTransparency = 0.2
+Frame.Parent = ScreenGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Text = "Dragon Ball Collector"
+Title.Parent = Frame
+
+local Toggle = Instance.new("TextButton")
+Toggle.Size = UDim2.new(1, -10, 0, 40)
+Toggle.Position = UDim2.new(0, 5, 0, 50)
+Toggle.Parent = Frame
+
+local function UpdateButton()
+	Toggle.Text = ENABLED and "Auto Dragon Ball: ON" or "Auto Dragon Ball: OFF"
+end
+
+UpdateButton()
+
+Toggle.MouseButton1Click:Connect(function()
+	ENABLED = not ENABLED
+	UpdateButton()
+end)
+
+local dragging = false
+local dragInput
+local dragStart
+local startPos
+
+local function update(input)
+	local delta = input.Position - dragStart
+
+	Frame.Position = UDim2.new(
+		startPos.X.Scale,
+		startPos.X.Offset + delta.X,
+		startPos.Y.Scale,
+		startPos.Y.Offset + delta.Y
+	)
+end
+
+Frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+	or input.UserInputType == Enum.UserInputType.Touch then
+
+		dragging = true
+		dragStart = input.Position
+		startPos = Frame.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+Frame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement
+	or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UIS.InputChanged:Connect(function(input)
+	if dragging and input == dragInput then
+		update(input)
+	end
+end)
+
+local function getRoot()
+	local char = LocalPlayer.Character
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function findPrompt(obj)
+	for _, v in ipairs(obj:GetDescendants()) do
+		if v:IsA("ProximityPrompt") then
+			return v
+		end
+	end
+end
+
+local function collectDragonBall(ball)
+	local root = getRoot()
+	if not root then
+		return
+	end
+
+	local targetPart
+
+	if ball:IsA("BasePart") then
+		targetPart = ball
+	else
+		targetPart = ball:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	if not targetPart then
+		return
+	end
+
+	-- Teleport to Dragon Ball
+	root.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+
+	task.wait(0.1)
+
+	-- Spam Proximity Prompt
+	local prompt = findPrompt(ball)
+
+	if prompt then
+		for i = 1, 10 do
+			pcall(function()
+				fireproximityprompt(prompt)
+			end)
+			task.wait(0.05)
+		end
+	end
+end
+
+task.spawn(function()
+	while true do
+		if ENABLED then
+			local ignoreFolder = workspace:FindFirstChild("Ignore")
+			local foundBall = false
+
+			if ignoreFolder then
+				for _, obj in ipairs(ignoreFolder:GetChildren()) do
+					if string.match(obj.Name, "^Dragon Ball %d+$") then
+						foundBall = true
+						collectDragonBall(obj)
+					end
+				end
+			end
+
+			-- No Dragon Balls found
+			if not foundBall then
+				local root = getRoot()
+
+				if root then
+					root.CFrame = CFrame.new(SAFE_POSITION)
+				end
+			end
+		end
+
+		task.wait(10)
+	end
+end)
