@@ -251,7 +251,7 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Fly & Face Attachment Loop (Smooth Physics Anchor Edition)
+-- Fly & Face Attachment Loop (Unlocked Camera Edition)
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
@@ -262,12 +262,8 @@ RunService.RenderStepped:Connect(function()
         return 
     end
 
-    -- If farming is turned off, safely clean up the physics anchor
     if not FARMING_ACTIVE then 
-        if flyAnchor then 
-            flyAnchor:Destroy() 
-            flyAnchor = nil 
-        end
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
         return 
     end
 
@@ -275,28 +271,30 @@ RunService.RenderStepped:Connect(function()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
         
-        -- CREATE PHYSICS ANCHOR: This mimics standard fly scripts to stop all drifting/shaking
+        -- Create a bulletproof physics anchor to stop screen shaking and drifting
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
             if flyAnchor then flyAnchor:Destroy() end
             flyAnchor = Instance.new("BodyVelocity")
             flyAnchor.Name = "AntiDriftAnchor"
-            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge) -- Overpowers gravity completely
-            flyAnchor.Velocity = Vector3.new(0, 0, 0) -- Forces your character to stand completely still in the air
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
             flyAnchor.Parent = myRoot
         end
         
-        -- 1. Calculate world offset position relative to enemy space orientation
+        -- 1. Calculate world position offset relative to enemy orientation
         local targetPosition = (enemyRoot.CFrame * CFrame.new(currentOffset)).Position
         
-        -- 2. Matrix Look-At forces player to rotate and face enemy directly while hovering
-        myRoot.CFrame = CFrame.lookAt(targetPosition, enemyRoot.Position)
+        -- 2. CALCULATE UNLOCKED ANGLE: Find the direction to the mob on a flat plane
+        local direction = (enemyRoot.Position - targetPosition).Unit
+        local angleY = math.atan2(-direction.X, -direction.Z) -- Get the exact compass heading
+        
+        -- 3. Teleport character position while keeping the camera angle unlocked
+        -- This updates your position and horizontal rotation without snapping your vertical camera view
+        myRoot.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, angleY, 0)
     else
-        -- Clean up if your target dies and no other selected enemies are nearby
-        if flyAnchor then 
-            flyAnchor:Destroy() 
-            flyAnchor = nil 
-        end
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
     end
 end)
 
-print("Drift-Free Physics Anchor Attacher Active!")
+print("Drift-Free Attacher with Unlocked Camera Control Active!")
+
