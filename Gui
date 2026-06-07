@@ -202,7 +202,7 @@ task.spawn(function()
                     for _, tool in ipairs(backpack:GetChildren()) do
                         if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" and tool.Parent == backpack then
                             tool.Parent = character
-                            task.wait(0.1)
+                            task.wait(0.01)
                         end
                     end
                 end
