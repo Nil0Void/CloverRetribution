@@ -11,7 +11,10 @@ local currentOffset = Vector3.new(0, 5, 15)
 local currentTarget = nil
 local flyAnchor = nil
 
--- Multi-State Target Tracking Table (Saves states as "OFF", "ON", or "PRIORITY")
+-- Tracked Chest Memory to prevent getting stuck if a chest is broken/empty
+local processedChests = {}
+
+-- Multi-State Target Tracking Table
 local targets = {
     Mobs = {
         ["Yeti"] = "OFF", ["Vampire Soldier"] = "OFF", ["Stone Guardian"] = "OFF",
@@ -28,7 +31,7 @@ local targets = {
         ["Netherwing"] = "OFF", ["Khamsin"] = "OFF", ["Ice Golem"] = "OFF",
         ["Nyxar"] = "OFF", ["Word Devil"] = "OFF", ["Devil"] = "OFF",
         ["Medusa"] = "OFF", ["Aetherion"] = "OFF", ["Morningstar"] = "OFF",
-        ["Primal Werewolf"] = "OFF", ["Lucius"] = "OFF"
+        ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF" -- Successfully swapped Lucius to Elder Vampire
     }
 }
 
@@ -72,7 +75,7 @@ toggleBtn.MouseButton1Click:Connect(function()
     toggleBtn.BackgroundColor3 = FARMING_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
 end)
 
--- Category Frame Generation Helper (Supports Tri-State Button Cycling)
+-- Category Frame Generation Helper
 local function createCategoryScroll(titleText, xOffset, targetSubTable)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(0, 205, 0, 220)
@@ -129,7 +132,7 @@ local function createCategoryScroll(titleText, xOffset, targetSubTable)
                 mobBtn.Text = "⭐ " .. mobName .. " [PRIO]"
                 mobBtn.BackgroundColor3 = Color3.fromRGB(168, 126, 42)
                 mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-                currentTarget = nil -- Force retargeting calculation update
+                currentTarget = nil 
             else
                 targetSubTable[mobName] = "OFF"
                 mobBtn.Text = mobName .. " [OFF]"
@@ -218,7 +221,7 @@ createSlider("🔄 Orbit Position", -180, 180, 0, 320)
 createSlider("📐 Height", -20, 30, 5, 370)
 createSlider("📏 Distance", 0, 50, 15, 420)
 
--- UI Mobile & Desktop Dragging Framework
+-- Dragging Framework
 local dragging, dragStart, startPos = false, nil, nil
 frame.InputBegan:Connect(function(input)
     if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then
@@ -234,6 +237,35 @@ end)
 UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
+
+-- Helper function to fetch the dynamic event chests folder contents safely
+local function getActiveEventChestPrompt()
+    local eventsFolder = workspace:FindFirstChild("Entities")
+    eventsFolder = eventsFolder and eventsFolder:FindFirstChild("Events")
+    if not eventsFolder then return nil end
+
+    -- Read any active area dynamically (like Grasslands Warlord or any adjacent zones)
+    for _, zone in ipairs(eventsFolder:GetChildren()) do
+        local chestsFolder = zone:FindFirstChild("Chests")
+        if chestsFolder then
+            local children = chestsFolder:GetChildren()
+            -- Explicit constraint checking if child index position #2 is populated and loaded
+            if #children >= 2 then
+                local secondContainer = children[2] -- Fixes missing index lookup bracket
+                local actualChest = secondContainer:FindFirstChild("Chest") or secondContainer
+                
+                -- Verify we haven't already hit this exact unique model 10 times
+                if actualChest and not processedChests[actualChest] then
+                    local prompt = actualChest:FindFirstChildOfClass("ProximityPrompt") or actualChest:FindFirstChild("ProximityPrompt", true)
+                    if prompt then
+                        return prompt, actualChest
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
 
 -- Target Detection Helper (Partial Match + Tri-State Priority Layer Filtering)
 local function getActiveFarmTarget()
@@ -344,6 +376,26 @@ RunService.RenderStepped:Connect(function()
         return 
     end
 
+    -- TOP OVERRIDE: Check if an Event Chest has spawned on the map [INDEX]
+    local chestPrompt, chestModel = getActiveEventChestPrompt()
+    if chestPrompt and chestModel then
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.Name = "AntiDriftAnchor"
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+
+        local chestPart = chestModel:IsA("BasePart") and chestModel or chestModel:FindFirstChildWhichIsA("BasePart", true)
+        if chestPart then
+            myRoot.CFrame = chestPart.CFrame * CFrame.new(0, 3, 0)
+        end
+        return
+    end
+
+    -- Standard Combat Targeting Loop
     local currentEnemy = getActiveFarmTarget()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
@@ -357,7 +409,6 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
         
-        -- Front-To-Back Vertical Orbit calculations
         local angleRad = math.rad(currentOffset.X) 
         local radiusDistance = currentOffset.Z
         local staticHeightAdjust = currentOffset.Y
@@ -373,4 +424,24 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("Tri-State Priority Orbital Target Panel Successfully Loaded!")
+-- Dedicated Async Thread for Chest Claim Processing & Interaction Spam
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if FARMING_ACTIVE then
+            local chestPrompt, chestModel = getActiveEventChestPrompt()
+            if chestPrompt and chestModel then
+                processedChests[chestModel] = true
+                
+                for i = 1, 10 do
+                    pcall(function()
+                        fireproximityprompt(chestPrompt)
+                    end)
+                    task.wait(0.05)
+                end
+            end
+        end
+    end
+end)
+
+print("Master Priority Orbital Attacher with Auto Chest Claim Active!")
