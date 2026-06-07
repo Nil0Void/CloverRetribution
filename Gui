@@ -366,4 +366,15 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
+-- Anti-AFK / Anti-Idle Engine Connection
+local virtualUser = game:GetService("VirtualUser")
+
+player.Idled:Connect(function()
+    -- Simulates a hardware click to reset Roblox's internal 20-minute idle timer
+    virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait(0.5)
+    virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+end)
+
+
 print("All features initialized with static labels. Ready!")
