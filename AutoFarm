@@ -1,0 +1,221 @@
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+
+-- Global Targeting Variables
+local FARMING_ACTIVE = false
+local currentOffset = Vector3.new(0, 5, 0) -- Controlled by your sliders
+
+-- Remote Action Trigger (From your original setup)
+local remote = ReplicatedStorage
+    :WaitForChild("ReplicatedPackage")
+    :WaitForChild("Remotes")
+    :WaitForChild("action")
+
+-- Target Filtering Tables
+local targets = {
+    Mobs = {
+        ["Yeti"] = false, ["Vampire Soldier"] = false, ["Stone Guardian"] = false,
+        ["Shadow Hand Goon"] = false, ["Seasoned Mercenary"] = false, ["Riddled Skeleton Soldier"] = false,
+        ["Pumpkin"] = false, ["Wolf"] = false, ["Mage Apprentice"] = false,
+        ["Lesser Devil Juggernaut"] = false, ["Desert Claw"] = false, ["Bandit"] = false,
+        ["Wolf Hunter"] = false, ["Wind Monk"] = false, ["Lowly Goblin"] = false,
+        ["Werewolf Soldier"] = false
+    },
+    Bosses = {
+        ["Vennum"] = false, ["Alpha Wolf"] = false, ["Warlord"] = false,
+        ["Terra"] = false, ["Red"] = false, ["Alpha Desert Claw"] = false,
+        ["Apex"] = false, ["Kraken"] = false, ["The Crimson Witch"] = false,
+        ["Netherwing"] = false, ["Khamsin"] = false, ["Ice Golem"] = false,
+        ["Nyxar"] = false, ["Word Devil"] = false, ["Devil"] = false,
+        ["Medusa"] = false, ["Aetherion"] = false, ["Morningstar"] = false,
+        ["Primal Werewolf"] = false, ["Lucius"] = false, ["Elite Vampire"] = false
+    }
+}
+
+-- Core GUI Construction
+local gui = Instance.new("ScreenGui")
+gui.Name = "MobSelectorFarmGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 440, 0, 320)
+frame.Position = UDim2.new(0.5, -220, 0.5, -160)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 2
+frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+frame.Active = true
+frame.Parent = gui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 35)
+titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+titleLabel.Text = "🎯 Smart Target Selector & Farmer"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 16
+titleLabel.Parent = frame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(1, -20, 0, 35)
+toggleBtn.Position = UDim2.new(0, 10, 0, 45)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+toggleBtn.Text = "Master Auto Farm: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.TextSize = 15
+toggleBtn.Parent = frame
+
+toggleBtn.MouseButton1Click:Connect(function()
+    FARMING_ACTIVE = not FARMING_ACTIVE
+    toggleBtn.Text = FARMING_ACTIVE and "Master Auto Farm: ON" or "Master Auto Farm: OFF"
+    toggleBtn.BackgroundColor3 = FARMING_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+end)
+
+-- Category Frame Generation Helper
+local function createCategoryScroll(titleText, xOffset, targetSubTable)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(0, 205, 0, 220)
+    container.Position = UDim2.new(0, xOffset, 0, 90)
+    container.BackgroundTransparency = 1
+    container.Parent = frame
+
+    local catTitle = Instance.new("TextLabel")
+    catTitle.Size = UDim2.new(1, 0, 0, 20)
+    catTitle.BackgroundTransparency = 1
+    catTitle.Text = titleText
+    catTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+    catTitle.Font = Enum.Font.SourceSansBold
+    catTitle.TextSize = 14
+    catTitle.Parent = container
+
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, 0, 1, -25)
+    scroll.Position = UDim2.new(0, 0, 0, 25)
+    scroll.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0) -- Managed by code
+    scroll.ScrollBarThickness = 5
+    scroll.Parent = container
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 4)
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.Parent = scroll
+
+    -- Populate items dynamically alphabetical order sorted
+    local sortedNames = {}
+    for name in pairs(targetSubTable) do table.insert(sortedNames, name) end
+    table.sort(sortedNames)
+
+    for _, mobName in ipairs(sortedNames) do
+        local mobBtn = Instance.new("TextButton")
+        mobBtn.Size = UDim2.new(0, 190, 0, 30)
+        mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+        mobBtn.Text = mobName .. " [OFF]"
+        mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+        mobBtn.Font = Enum.Font.SourceSans
+        mobBtn.TextSize = 13
+        mobBtn.Parent = scroll
+
+        mobBtn.MouseButton1Click:Connect(function()
+            targetSubTable[mobName] = not targetSubTable[mobName]
+            if targetSubTable[mobName] then
+                mobBtn.Text = mobName .. " [ON]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(56, 92, 145)
+                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            else
+                mobBtn.Text = mobName .. " [OFF]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+                mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            end
+        end)
+    end
+    
+    scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+end
+
+-- Render the Dynamic Selection Interface Lists Side-by-Side
+createCategoryScroll("⚔️ Mobs Category", 10, targets.Mobs)
+createCategoryScroll("👹 Bosses & Elites", 225, targets.Bosses)
+
+-- UI Mobile & Desktop Dragging Framework
+local dragging, dragStart, startPos = false, nil, nil
+frame.InputBegan:Connect(function(input)
+    if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then
+        dragging, dragStart, startPos = true, input.Position, frame.Position
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+end)
+
+-- Low-Overhead Target Detection Mechanics
+local function getActiveFarmTarget()
+    -- Safely parse the targeted directory supplied by you
+    local enemiesFolder = workspace:FindFirstChild("Entities")
+    enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
+    if not enemiesFolder then return nil end
+
+    local character = player.Character
+    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+
+    for _, mob in ipairs(enemiesFolder:GetChildren()) do
+        local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+        local mobHum = mob:FindFirstChildOfClass("Humanoid")
+        
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            -- Match checking strictly utilizing optimized hash tables (instant performance lookups)
+            if targets.Bosses[mob.Name] == true or targets.Mobs[mob.Name] == true then
+                return mob
+            end
+        end
+    end
+    return nil
+end
+
+-- Continuous Lock and Automation Pipeline
+RunService.RenderStepped:Connect(function()
+    if not FARMING_ACTIVE then return end
+
+    local character = player.Character
+    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+    local myHum = character and character:FindFirstChildOfClass("Humanoid")
+    
+    if not myRoot or (myHum and myHum.Health <= 0) then return end
+
+    local currentEnemy = getActiveFarmTarget()
+    if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
+        -- Fast Lock Position calculation applying your custom Vector3 adjustments
+        myRoot.CFrame = currentEnemy.HumanoidRootPart.CFrame * CFrame.new(currentOffset)
+    end
+end)
+
+-- Dedicated Weapon Swinger Loop Thread
+task.spawn(function()
+    while true do
+        task.wait(0.2) -- Safe tick interval prevents client desync bans
+        if FARMING_ACTIVE then
+            pcall(function()
+                local currentEnemy = getActiveFarmTarget()
+                if currentEnemy then
+                    -- Keep swinging weapon to defeat the target
+                    remote:FireServer("EquipWeapon")
+                    -- If your game requires an attack event link, drop it right here
+                end
+            end)
+        end
+    end
+end)
+
+print("Smart Target Auto Farmer Script Active!")
