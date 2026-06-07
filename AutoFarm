@@ -232,7 +232,7 @@ end)
 -- Keeps track of our physics anchor object
 local flyAnchor = nil
 
--- Target Detection Helper
+-- Target Detection Helper (Partial Match & Case Insensitive Edition)
 local function getActiveFarmTarget()
     local enemiesFolder = workspace:FindFirstChild("Entities")
     enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
@@ -243,15 +243,27 @@ local function getActiveFarmTarget()
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
         
         if mobRoot and mobHum and mobHum.Health > 0 then
-            if targets.Bosses[mob.Name] == true or targets.Mobs[mob.Name] == true then
-                return mob
+            local lowerMobName = string.lower(mob.Name)
+            
+            -- Check against Bosses List (Using partial string searches)
+            for enabledBossName, isEnabled in pairs(targets.Bosses) do
+                if isEnabled and string.find(lowerMobName, string.lower(enabledBossName), 1, true) then
+                    return mob
+                end
+            end
+            
+            -- Check against Mobs List (Using partial string searches)
+            for enabledMobName, isEnabled in pairs(targets.Mobs) do
+                if isEnabled and string.find(lowerMobName, string.lower(enabledMobName), 1, true) then
+                    return mob
+                end
             end
         end
     end
     return nil
 end
 
--- Fly & Face Attachment Loop (Unlocked Camera Edition)
+-- Fly & Face Attachment Loop (Unlocked Free Look Camera + Forced Character Face Lock)
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
@@ -271,7 +283,7 @@ RunService.RenderStepped:Connect(function()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
         
-        -- Create a bulletproof physics anchor to stop screen shaking and drifting
+        -- Create a bulletproof physics anchor to stop all screen shaking and drifting
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
             if flyAnchor then flyAnchor:Destroy() end
             flyAnchor = Instance.new("BodyVelocity")
@@ -284,17 +296,11 @@ RunService.RenderStepped:Connect(function()
         -- 1. Calculate world position offset relative to enemy orientation
         local targetPosition = (enemyRoot.CFrame * CFrame.new(currentOffset)).Position
         
-        -- 2. CALCULATE UNLOCKED ANGLE: Find the direction to the mob on a flat plane
-        local direction = (enemyRoot.Position - targetPosition).Unit
-        local angleY = math.atan2(-direction.X, -direction.Z) -- Get the exact compass heading
-        
-        -- 3. Teleport character position while keeping the camera angle unlocked
-        -- This updates your position and horizontal rotation without snapping your vertical camera view
-        myRoot.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, angleY, 0)
+        -- 2. Forced Body Face-Lock: Rotates your body parts directly toward the mob's core
+        myRoot.CFrame = CFrame.lookAt(targetPosition, enemyRoot.Position)
     else
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
     end
 end)
 
-print("Drift-Free Attacher with Unlocked Camera Control Active!")
-
+print("Partial Matching Face-Lock Attacher Active!")
