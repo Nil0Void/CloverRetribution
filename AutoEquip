@@ -47,7 +47,8 @@ spellButton.MouseButton1Click:Connect(function()
 end)
 
 local function getSpellTools()
-    local backpack = player:WaitForChild("Backpack")
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return {} end
     local spells = {}
 
     for _, tool in ipairs(backpack:GetChildren()) do
@@ -98,62 +99,53 @@ UIS.InputChanged:Connect(function(input)
     end
 end)
 
--- Find player's entity
+-- BULLETPROOF ENTITY FINDER: Matches via name string instead of distance
 local function getEntity()
-    local character = player.Character
-    if not character then return nil end
+    local entitiesFolder = workspace:FindFirstChild("Entities")
+    if not entitiesFolder then return nil end
 
-    local myRoot = character:FindFirstChild("HumanoidRootPart")
+    -- Try matching by exact player name inside the Entities folder
+    local myEntity = entitiesFolder:FindFirstChild(player.Name)
+    if myEntity then return myEntity end
+
+    -- Fallback: If named differently, match via spatial position but with a generous tolerance
+    local character = player.Character
+    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
 
-    for _, entity in ipairs(workspace.Entities:GetChildren()) do
+    for _, entity in ipairs(entitiesFolder:GetChildren()) do
         local root = entity:FindFirstChild("HumanoidRootPart")
-
-        if root and (root.Position - myRoot.Position).Magnitude < 1 then
-            return entity
-        end
-    end
-
-    return nil
-end
-
--- Auto Equip Loop
-task.spawn(function()
-    while task.wait(1) do
-        if not spellEnabled then
-            continue
-        end
-
-        local spells = getSpellTools()
-
-        for _, tool in ipairs(spells) do
-            -- BEST PRACTICE (client side only):
-            -- equip locally if allowed
-            local character = player.Character
-            if character and tool.Parent == player.Backpack then
-                tool.Parent = character
-                task.wait(0.1)
+        -- Expanded distance threshold to 4 studs to absorb server desync lag over hours
+        if root and (root.Position - myRoot.Position).Magnitude  0 then
+                for _, tool in ipairs(spells) do
+                    if tool.Parent == player.Backpack then
+                        tool.Parent = character
+                        task.wait(0.1)
+                    end
+                end
             end
         end
     end
 end)
 
+-- Auto Equip Loop (Completely decoupled from crashing constraints)
 task.spawn(function()
-    while task.wait(1) do
-        if not enabled then
-            continue
-        end
+    while true do
+        task.wait(1)
+        if enabled then
+            -- Wrap in pcall so an internal game error never breaks the infinite loop structure
+            pcall(function()
+                local entity = getEntity()
+                if entity then
+                    if not entity:FindFirstChild("Weapon") then
+                        remote:FireServer("EquipWeapon")
+                    end
 
-        local entity = getEntity()
-
-        if entity then
-            if not entity:FindFirstChild("Weapon") then
-                remote:FireServer("EquipWeapon")
-            end
-
-            if not entity:FindFirstChild("Grimoire") then
-                remote:FireServer("Book")
-            end
+                    if not entity:FindFirstChild("Grimoire") then
+                        remote:FireServer("Book")
+                    end
+                end
+            </pcall>
         end
     end
 end)
