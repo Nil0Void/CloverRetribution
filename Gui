@@ -16,6 +16,10 @@ local SAFEZONE = Vector3.new(4315, 147, -1116)
 local FLOWER_DELAY = 0.2
 local LOOP_DELAY = 50
 
+-- Auto Walk Config
+local MOVE_DURATION = 5
+local RESET_TIME = 15
+
 -- UI Configuration (Unified Menu)
 local gui = Instance.new("ScreenGui")
 gui.Name = "UnifiedAutomationGui"
@@ -23,8 +27,8 @@ gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 220, 0, 280)
-frame.Position = UDim2.new(0.5, -110, 0.5, -140)
+frame.Size = UDim2.new(0, 220, 0, 300) -- Increased height slightly for 5th button
+frame.Position = UDim2.new(0.5, -110, 0.5, -150)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 2
 frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
@@ -45,7 +49,7 @@ local scroll = Instance.new("ScrollingFrame")
 scroll.Size = UDim2.new(1, 0, 1, -30)
 scroll.Position = UDim2.new(0, 0, 0, 30)
 scroll.BackgroundTransparency = 1
-scroll.CanvasSize = UDim2.new(0, 0, 0, 260)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 310)
 scroll.ScrollBarThickness = 6
 scroll.Parent = frame
 
@@ -64,21 +68,25 @@ local function createButton(text, order)
     btn.Font = Enum.Font.SourceSans
     btn.TextSize = 16
     btn.LayoutOrder = order
+    btn.Text = text -- Correctly label them immediately on startup
     btn.Parent = scroll
     return btn
 end
 
+-- Named explicitly from the beginning
 local bWeapon = createButton("⚔️ Auto Equip: OFF", 1)
 local bSpell = createButton("✨ Auto Spells: OFF", 2)
 local bBall = createButton("🐉 Auto Dragon Ball: OFF", 3)
 local bFlower = createButton("🌸 Flower Farm: OFF", 4)
+local bWalk = createButton("🚶 Auto Walk Cycle: OFF", 5)
 
 -- Toggle Tracking States
 local flags = {
     weapon = false,
     spell = false,
     dragonBall = false,
-    flower = false
+    flower = false,
+    walk = false
 }
 
 -- Button Interactions
@@ -104,6 +112,19 @@ bFlower.MouseButton1Click:Connect(function()
     flags.flower = not flags.flower
     bFlower.Text = flags.flower and "🌸 Flower Farm: ON" or "🌸 Flower Farm: OFF"
     bFlower.BackgroundColor3 = flags.flower and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
+
+bWalk.MouseButton1Click:Connect(function()
+    flags.walk = not flags.walk
+    bWalk.Text = flags.walk and "🚶 Auto Walk Cycle: ON" or "🚶 Auto Walk Cycle: OFF"
+    bWalk.BackgroundColor3 = flags.walk and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+    
+    -- Stop movement forces immediately if toggled off
+    if not flags.walk then
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid:Move(Vector3.new(0, 0, 0), false) end
+    end
 end)
 
 -- Bulletproof Mobile & PC Dragging Code
@@ -186,7 +207,6 @@ task.spawn(function()
                 return
             end
 
-            -- Weapons / Grimoires
             if flags.weapon then
                 local entity = getEntity()
                 if entity then
@@ -195,7 +215,6 @@ task.spawn(function()
                 end
             end
 
-            -- Spells
             if flags.spell then
                 local backpack = player:FindFirstChild("Backpack")
                 if backpack then
@@ -285,27 +304,66 @@ task.spawn(function()
                     local prompt = getPrompt(flower)
 
                     if part and prompt then
-HRP.CFrame = part.CFrame + Vector3.new(0, 3, 0)
-local startTime = tick()
-while flags.flower and tick() - startTime < FLOWER_DELAY do
-if prompt and prompt.Parent then fireproximityprompt(prompt) end
-task.wait()
-end
-end
-end
+                        HRP.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+                        local startTime = tick()
+                        while flags.flower and tick() - startTime < FLOWER_DELAY do
+                            if prompt and prompt.Parent then fireproximityprompt(prompt) end
+                            task.wait()
+                        end
+                    end
+                end
 
-if flags.flower then
-HRP.CFrame = CFrame.new(SAFEZONE)
-local elapsed = 0
-while flags.flower and elapsed < LOOP_DELAY do
-task.wait(0.1)
-elapsed = elapsed + 0.1
-end
-end
+                if flags.flower then
+                    HRP.CFrame = CFrame.new(SAFEZONE)
+                    local elapsed = 0
+                    while flags.flower and elapsed < LOOP_DELAY do
+                        task.wait(0.1)
+                        elapsed = elapsed + 0.1
+                    end
+                end
+            end)
+        else
+            task.wait(0.5)
+        end
+    end
 end)
-else
-task.wait(0.5)
-end
-end
+
+-- 5. Auto Walk & Reset Connection
+local phaseStartTime = os.clock()
+local characterResetTriggered = false
+
+RunService.RenderStepped:Connect(function()
+    if not flags.walk then 
+        characterResetTriggered = false
+        return 
+    end
+    
+    local character = player.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local primaryPart = character and character.PrimaryPart
+    
+    if humanoid and primaryPart and humanoid.Health > 0 then
+        local elapsed = os.clock() - phaseStartTime
+        
+        if elapsed < MOVE_DURATION then
+            -- Phase 1: Keep pushing forward based on camera orientation
+            local moveDirection = primaryPart.CFrame.LookVector
+            humanoid:Move(moveDirection, false)
+        elseif elapsed < RESET_TIME then
+            -- Phase 2: Stand completely still
+            humanoid:Move(Vector3.new(0, 0, 0), false)
+        else
+            -- Phase 3: Trigger the clean character death reset
+            if not characterResetTriggered then
+                characterResetTriggered = true
+                humanoid.Health = 0
+            end
+        end
+    else
+        -- Instantly refresh clock tracking while dead to pick up smoothly when respawning
+        phaseStartTime = os.clock()
+        characterResetTriggered = false
+    end
 end)
-print("Unified Mobile UI loaded successfully!")
+
+print("All features initialized with static labels. Ready!")
