@@ -7,13 +7,8 @@ local player = Players.LocalPlayer
 
 -- Global Targeting & Positioning State
 local FARMING_ACTIVE = false
-local currentOffset = Vector3.new(0, 5, 0) -- Controlled dynamically by the sliders below
-
--- Remote Action Trigger
-local remote = ReplicatedStorage
-    :WaitForChild("ReplicatedPackage")
-    :WaitForChild("Remotes")
-    :WaitForChild("action")
+local currentOffset = Vector3.new(0, 5, 15) -- Default: 0 deg orbit, 5 studs high, 15 studs away
+local flyAnchor = nil
 
 -- Target Filtering Tables
 local targets = {
@@ -36,7 +31,7 @@ local targets = {
     }
 }
 
--- Core GUI Construction (Sized to fit both target lists and sliders)
+-- Core GUI Construction
 local gui = Instance.new("ScreenGui")
 gui.Name = "MobSelectorAndSliderGui"
 gui.ResetOnSpawn = false
@@ -54,7 +49,7 @@ frame.Parent = gui
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, 0, 0, 35)
 titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-titleLabel.Text = "🎯 Mob Face-Lock & Offset Panel"
+titleLabel.Text = "📐 Orbital Face-Lock Attacher"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.TextSize = 16
@@ -139,13 +134,14 @@ end
 createCategoryScroll("⚔️ Mobs Category", 10, targets.Mobs)
 createCategoryScroll("👹 Bosses & Elites", 225, targets.Bosses)
 
--- Slider Construction Module
-local function createSlider(axisName, startVal, yOffset)
+-- Slider Construction Module with Expanded Ranges
+local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -20, 0, 20)
     label.Position = UDim2.new(0, 10, 0, yOffset)
     label.BackgroundTransparency = 1
-    label.Text = axisName .. " Offset: " .. tostring(startVal)
+    local suffix = (axisName:find("Orbit") and "°") or " studs"
+    label.Text = axisName .. ": " .. tostring(startVal) .. suffix
     label.TextColor3 = Color3.fromRGB(220, 220, 220)
     label.Font = Enum.Font.SourceSansBold
     label.TextSize = 13
@@ -161,7 +157,7 @@ local function createSlider(axisName, startVal, yOffset)
 
     local sliderBtn = Instance.new("TextButton")
     sliderBtn.Size = UDim2.new(0, 16, 0, 16)
-    local pct = (startVal + 15) / 30 -- Map -15 to +15 stud limits
+    local pct = (startVal - minVal) / (maxVal - minVal)
     sliderBtn.Position = UDim2.new(pct, -8, 0.5, -8)
     sliderBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
     sliderBtn.Text = ""
@@ -176,14 +172,14 @@ local function createSlider(axisName, startVal, yOffset)
         local clmp = math.clamp((inputPosition.X - barAbsPos) / barAbsSize, 0, 1)
         
         sliderBtn.Position = UDim2.new(clmp, -8, 0.5, -8)
-        local value = math.round((clmp * 30) - 15)
-        label.Text = axisName .. " Offset: " .. tostring(value)
+        local value = math.round(minVal + (clmp * (maxVal - minVal)))
+        label.Text = axisName .. ": " .. tostring(value) .. suffix
         
-        if axisName == "X (Left / Right)" then
+        if axisName == "🔄 Orbit Position" then
             currentOffset = Vector3.new(value, currentOffset.Y, currentOffset.Z)
-        elseif axisName == "Y (Up / Down)" then
+        elseif axisName == "📐 Height" then
             currentOffset = Vector3.new(currentOffset.X, value, currentOffset.Z)
-        elseif axisName == "Z (Front / Back)" then
+        elseif axisName == "📏 Distance" then
             currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, value)
         end
     end
@@ -207,12 +203,12 @@ local function createSlider(axisName, startVal, yOffset)
     end)
 end
 
--- Render the three layout slider channels safely below target panels
-createSlider("X (Left / Right)", 0, 320)
-createSlider("Y (Up / Down)", 5, 370)
-createSlider("Z (Front / Back)", 4, 420)
+-- Render Restructured Expanded Sliders
+createSlider("🔄 Orbit Position", -180, 180, 0, 320) -- Full 360-degree rotation circle around mob
+createSlider("📐 Height", -20, 30, 5, 370)          -- Floats up to 30 studs high or 20 studs below
+createSlider("📏 Distance", 0, 50, 15, 420)         -- Range expanded smoothly out to 50 studs away
 
--- UI Mobile & Desktop Dragging Framework
+-- UI Dragging Framework
 local dragging, dragStart, startPos = false, nil, nil
 frame.InputBegan:Connect(function(input)
     if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then
@@ -229,10 +225,7 @@ UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
--- Keeps track of our physics anchor object
-local flyAnchor = nil
-
--- Target Detection Helper (Partial Match & Case Insensitive)
+-- Target Detection Helper (Partial Match)
 local function getActiveFarmTarget()
     local enemiesFolder = workspace:FindFirstChild("Entities")
     enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
@@ -245,25 +238,20 @@ local function getActiveFarmTarget()
         if mobRoot and mobHum and mobHum.Health > 0 then
             local lowerMobName = string.lower(mob.Name)
             
-            -- Check against Bosses List (Using partial string searches)
+            -- Checks if your selected keyword is a substring of the enemy's name
             for enabledBossName, isEnabled in pairs(targets.Bosses) do
-                if isEnabled and string.find(lowerMobName, string.lower(enabledBossName), 1, true) then
-                    return mob
-                end
+                if isEnabled and string.find(lowerMobName, string.lower(enabledBossName), 1, true) then return mob end
             end
             
-            -- Check against Mobs List (Using partial string searches)
             for enabledMobName, isEnabled in pairs(targets.Mobs) do
-                if isEnabled and string.find(lowerMobName, string.lower(enabledMobName), 1, true) then
-                    return mob
-                end
+                if isEnabled and string.find(lowerMobName, string.lower(enabledMobName), 1, true) then return mob end
             end
         end
     end
     return nil
 end
 
--- Fly & Orbit Attachment Loop
+-- Fly & Orbit Core Loop Mathematics
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
@@ -293,28 +281,19 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
         
-        -- ORBITAL MATHEMATICS:
-        -- Convert the X slider value into an angle calculation (radians)
-        -- We multiply by 15 or 20 to give you a full degree rotation spread across the slider track
-        local angleRad = math.rad(currentOffset.X * 12) 
-        
-        -- Z slider now represents your dynamic distance from the target
+        -- Process expanded angles and distances
+        local angleRad = math.rad(currentOffset.X) 
         local radiusDistance = currentOffset.Z
-        
-        -- Calculate the orbit positioning relative to the mob's core coordinate center
-        local orbitX = math.sin(angleRad) * radiusDistance
-        local orbitZ = math.cos(angleRad) * radiusDistance
         local heightY = currentOffset.Y
         
-        -- Package into a clean offset Vector relative to the enemy's spatial frame
-        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(orbitX, heightY, orbitZ)).Position
+        local orbitX = math.sin(angleRad) * radiusDistance
+        local orbitZ = math.cos(angleRad) * radiusDistance
         
-        -- Force your character to position on the orbital line and face directly toward the enemy center
+        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(orbitX, heightY, orbitZ)).Position
         myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
     else
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
     end
 end)
 
-print("Orbital Target Attacher Panel Active!")
-
+print("Expanded Orbital Panel Configured!")
