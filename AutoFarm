@@ -232,7 +232,7 @@ end)
 -- Keeps track of our physics anchor object
 local flyAnchor = nil
 
--- Target Detection Helper (Partial Match & Case Insensitive Edition)
+-- Target Detection Helper (Partial Match & Case Insensitive)
 local function getActiveFarmTarget()
     local enemiesFolder = workspace:FindFirstChild("Entities")
     enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
@@ -263,7 +263,7 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Fly & Face Attachment Loop (Unlocked Free Look Camera + Forced Character Face Lock)
+-- Fly & Orbit Attachment Loop
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
@@ -293,14 +293,28 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
         
-        -- 1. Calculate world position offset relative to enemy orientation
-        local targetPosition = (enemyRoot.CFrame * CFrame.new(currentOffset)).Position
+        -- ORBITAL MATHEMATICS:
+        -- Convert the X slider value into an angle calculation (radians)
+        -- We multiply by 15 or 20 to give you a full degree rotation spread across the slider track
+        local angleRad = math.rad(currentOffset.X * 12) 
         
-        -- 2. Forced Body Face-Lock: Rotates your body parts directly toward the mob's core
-        myRoot.CFrame = CFrame.lookAt(targetPosition, enemyRoot.Position)
+        -- Z slider now represents your dynamic distance from the target
+        local radiusDistance = currentOffset.Z
+        
+        -- Calculate the orbit positioning relative to the mob's core coordinate center
+        local orbitX = math.sin(angleRad) * radiusDistance
+        local orbitZ = math.cos(angleRad) * radiusDistance
+        local heightY = currentOffset.Y
+        
+        -- Package into a clean offset Vector relative to the enemy's spatial frame
+        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(orbitX, heightY, orbitZ)).Position
+        
+        -- Force your character to position on the orbital line and face directly toward the enemy center
+        myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
     else
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
     end
 end)
 
-print("Partial Matching Face-Lock Attacher Active!")
+print("Orbital Target Attacher Panel Active!")
+
