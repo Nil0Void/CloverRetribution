@@ -5,11 +5,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 
--- Global Targeting Variables
+-- Global Targeting & Positioning State
 local FARMING_ACTIVE = false
-local currentOffset = Vector3.new(0, 5, 0) -- Controlled by your sliders
+local currentOffset = Vector3.new(0, 5, 0) -- Controlled dynamically by the sliders below
 
--- Remote Action Trigger (From your original setup)
+-- Remote Action Trigger
 local remote = ReplicatedStorage
     :WaitForChild("ReplicatedPackage")
     :WaitForChild("Remotes")
@@ -32,19 +32,19 @@ local targets = {
         ["Netherwing"] = false, ["Khamsin"] = false, ["Ice Golem"] = false,
         ["Nyxar"] = false, ["Word Devil"] = false, ["Devil"] = false,
         ["Medusa"] = false, ["Aetherion"] = false, ["Morningstar"] = false,
-        ["Primal Werewolf"] = false, ["Lucius"] = false, ["Elite Vampire"] = false
+        ["Primal Werewolf"] = false, ["Lucius"] = false
     }
 }
 
--- Core GUI Construction
+-- Core GUI Construction (Sized to fit both target lists and sliders)
 local gui = Instance.new("ScreenGui")
-gui.Name = "MobSelectorFarmGui"
+gui.Name = "MobSelectorAndSliderGui"
 gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 440, 0, 320)
-frame.Position = UDim2.new(0.5, -220, 0.5, -160)
+frame.Size = UDim2.new(0, 440, 0, 490)
+frame.Position = UDim2.new(0.5, -220, 0.5, -245)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 2
 frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
@@ -54,7 +54,7 @@ frame.Parent = gui
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, 0, 0, 35)
 titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-titleLabel.Text = "🎯 Smart Target Selector & Farmer"
+titleLabel.Text = "🎯 Mob Face-Lock & Offset Panel"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.TextSize = 16
@@ -97,7 +97,7 @@ local function createCategoryScroll(titleText, xOffset, targetSubTable)
     scroll.Size = UDim2.new(1, 0, 1, -25)
     scroll.Position = UDim2.new(0, 0, 0, 25)
     scroll.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 0) -- Managed by code
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     scroll.ScrollBarThickness = 5
     scroll.Parent = container
 
@@ -106,7 +106,6 @@ local function createCategoryScroll(titleText, xOffset, targetSubTable)
     layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     layout.Parent = scroll
 
-    -- Populate items dynamically alphabetical order sorted
     local sortedNames = {}
     for name in pairs(targetSubTable) do table.insert(sortedNames, name) end
     table.sort(sortedNames)
@@ -134,13 +133,84 @@ local function createCategoryScroll(titleText, xOffset, targetSubTable)
             end
         end)
     end
-    
     scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
 end
 
--- Render the Dynamic Selection Interface Lists Side-by-Side
 createCategoryScroll("⚔️ Mobs Category", 10, targets.Mobs)
 createCategoryScroll("👹 Bosses & Elites", 225, targets.Bosses)
+
+-- Slider Construction Module
+local function createSlider(axisName, startVal, yOffset)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -20, 0, 20)
+    label.Position = UDim2.new(0, 10, 0, yOffset)
+    label.BackgroundTransparency = 1
+    label.Text = axisName .. " Offset: " .. tostring(startVal)
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -20, 0, 8)
+    sliderBg.Position = UDim2.new(0, 10, 0, yOffset + 20)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = frame
+
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Size = UDim2.new(0, 16, 0, 16)
+    local pct = (startVal + 15) / 30 -- Map -15 to +15 stud limits
+    sliderBtn.Position = UDim2.new(pct, -8, 0.5, -8)
+    sliderBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+    sliderBtn.Text = ""
+    sliderBtn.BorderSizePixel = 0
+    sliderBtn.Parent = sliderBg
+
+    local activeDragging = false
+
+    local function updateSliderPosition(inputPosition)
+        local barAbsPos = sliderBg.AbsolutePosition.X
+        local barAbsSize = sliderBg.AbsoluteSize.X
+        local clmp = math.clamp((inputPosition.X - barAbsPos) / barAbsSize, 0, 1)
+        
+        sliderBtn.Position = UDim2.new(clmp, -8, 0.5, -8)
+        local value = math.round((clmp * 30) - 15)
+        label.Text = axisName .. " Offset: " .. tostring(value)
+        
+        if axisName == "X (Left / Right)" then
+            currentOffset = Vector3.new(value, currentOffset.Y, currentOffset.Z)
+        elseif axisName == "Y (Up / Down)" then
+            currentOffset = Vector3.new(currentOffset.X, value, currentOffset.Z)
+        elseif axisName == "Z (Front / Back)" then
+            currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, value)
+        end
+    end
+
+    sliderBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            activeDragging = true
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if activeDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateSliderPosition(input.Position)
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            activeDragging = false
+        end
+    end)
+end
+
+-- Render the three layout slider channels safely below target panels
+createSlider("X (Left / Right)", 0, 320)
+createSlider("Y (Up / Down)", 5, 370)
+createSlider("Z (Front / Back)", 4, 420)
 
 -- UI Mobile & Desktop Dragging Framework
 local dragging, dragStart, startPos = false, nil, nil
@@ -159,23 +229,17 @@ UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
--- Low-Overhead Target Detection Mechanics
+-- Target Detection Helper
 local function getActiveFarmTarget()
-    -- Safely parse the targeted directory supplied by you
     local enemiesFolder = workspace:FindFirstChild("Entities")
     enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
     if not enemiesFolder then return nil end
-
-    local character = player.Character
-    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return nil end
 
     for _, mob in ipairs(enemiesFolder:GetChildren()) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
         
         if mobRoot and mobHum and mobHum.Health > 0 then
-            -- Match checking strictly utilizing optimized hash tables (instant performance lookups)
             if targets.Bosses[mob.Name] == true or targets.Mobs[mob.Name] == true then
                 return mob
             end
@@ -184,7 +248,7 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Continuous Lock and Automation Pipeline
+-- Fly & Face Attachment Loop
 RunService.RenderStepped:Connect(function()
     if not FARMING_ACTIVE then return end
 
@@ -196,26 +260,14 @@ RunService.RenderStepped:Connect(function()
 
     local currentEnemy = getActiveFarmTarget()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
-        -- Fast Lock Position calculation applying your custom Vector3 adjustments
-        myRoot.CFrame = currentEnemy.HumanoidRootPart.CFrame * CFrame.new(currentOffset)
+        local enemyRoot = currentEnemy.HumanoidRootPart
+        
+        -- 1. Calculate world offset position relative to enemy space orientation
+        local targetPosition = (enemyRoot.CFrame * CFrame.new(currentOffset)).Position
+        
+        -- 2. Matrix Look-At forces player to rotate and face enemy directly while hovering
+        myRoot.CFrame = CFrame.lookAt(targetPosition, enemyRoot.Position)
     end
 end)
 
--- Dedicated Weapon Swinger Loop Thread
-task.spawn(function()
-    while true do
-        task.wait(0.2) -- Safe tick interval prevents client desync bans
-        if FARMING_ACTIVE then
-            pcall(function()
-                local currentEnemy = getActiveFarmTarget()
-                if currentEnemy then
-                    -- Keep swinging weapon to defeat the target
-                    remote:FireServer("EquipWeapon")
-                    -- If your game requires an attack event link, drop it right here
-                end
-            end)
-        end
-    end
-end)
-
-print("Smart Target Auto Farmer Script Active!")
+print("Offset Attacher Panel with Face-Lock Active!")
