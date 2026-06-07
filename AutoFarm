@@ -7,11 +7,12 @@ local player = Players.LocalPlayer
 
 -- Global Targeting & Positioning State
 local FARMING_ACTIVE = false
+local CHEST_ACTIVE = false -- Managed by the new chest toggle button
 local currentOffset = Vector3.new(0, 5, 15)
 local currentTarget = nil
 local flyAnchor = nil
 
--- Tracked Chest Memory to prevent getting stuck if a chest is broken/empty
+-- Tracked Chest Memory
 local processedChests = {}
 
 -- Multi-State Target Tracking Table
@@ -31,7 +32,7 @@ local targets = {
         ["Netherwing"] = "OFF", ["Khamsin"] = "OFF", ["Ice Golem"] = "OFF",
         ["Nyxar"] = "OFF", ["Word Devil"] = "OFF", ["Devil"] = "OFF",
         ["Medusa"] = "OFF", ["Aetherion"] = "OFF", ["Morningstar"] = "OFF",
-        ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF" -- Successfully swapped Lucius to Elder Vampire
+        ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF"
     }
 }
 
@@ -42,8 +43,8 @@ gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 440, 0, 490)
-frame.Position = UDim2.new(0.5, -220, 0.5, -245)
+frame.Size = UDim2.new(0, 440, 0, 530) -- Height adjusted slightly for the extra button row
+frame.Position = UDim2.new(0.5, -220, 0.5, -265)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 2
 frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
@@ -59,14 +60,15 @@ titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.TextSize = 16
 titleLabel.Parent = frame
 
+-- Main Farm Control Button
 local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(1, -20, 0, 35)
+toggleBtn.Size = UDim2.new(0, 205, 0, 35)
 toggleBtn.Position = UDim2.new(0, 10, 0, 45)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
 toggleBtn.Text = "Master Auto Farm: OFF"
 toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleBtn.Font = Enum.Font.SourceSansBold
-toggleBtn.TextSize = 15
+toggleBtn.TextSize = 14
 toggleBtn.Parent = frame
 
 toggleBtn.MouseButton1Click:Connect(function()
@@ -75,11 +77,28 @@ toggleBtn.MouseButton1Click:Connect(function()
     toggleBtn.BackgroundColor3 = FARMING_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
 end)
 
+-- Chest Farm Control Button
+local chestBtn = Instance.new("TextButton")
+chestBtn.Size = UDim2.new(0, 205, 0, 35)
+chestBtn.Position = UDim2.new(0, 225, 0, 45)
+chestBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+chestBtn.Text = "🎁 Auto Chests: OFF"
+chestBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+chestBtn.Font = Enum.Font.SourceSansBold
+chestBtn.TextSize = 14
+chestBtn.Parent = frame
+
+chestBtn.MouseButton1Click:Connect(function()
+    CHEST_ACTIVE = not CHEST_ACTIVE
+    chestBtn.Text = CHEST_ACTIVE and "🎁 Auto Chests: ON" or "🎁 Auto Chests: OFF"
+    chestBtn.BackgroundColor3 = CHEST_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+end)
+
 -- Category Frame Generation Helper
 local function createCategoryScroll(titleText, xOffset, targetSubTable)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(0, 205, 0, 220)
-    container.Position = UDim2.new(0, xOffset, 0, 90)
+    container.Position = UDim2.new(0, xOffset, 0, 95) -- Moved down 5 pixels to match spacing
     container.BackgroundTransparency = 1
     container.Parent = frame
 
@@ -217,11 +236,12 @@ local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
     end)
 end
 
-createSlider("🔄 Orbit Position", -180, 180, 0, 320)
-createSlider("📐 Height", -20, 30, 5, 370)
-createSlider("📏 Distance", 0, 50, 15, 420)
+-- Sliders shifted down down by 40 pixels to clear the layout padding adjustments cleanly
+createSlider("🔄 Orbit Position", -180, 180, 0, 360)
+createSlider("📐 Height", -20, 30, 5, 410)
+createSlider("📏 Distance", 0, 50, 15, 460)
 
--- Dragging Framework
+-- UI Mobile & Desktop Dragging Framework
 local dragging, dragStart, startPos = false, nil, nil
 frame.InputBegan:Connect(function(input)
     if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then
@@ -240,18 +260,29 @@ end)
 
 -- Helper function to search the entire Event branch dynamically for valid chests
 local function getActiveEventChestPrompt()
+    if not CHEST_ACTIVE then return nil end
+
     local eventsFolder = workspace:FindFirstChild("Entities")
     eventsFolder = eventsFolder and eventsFolder:FindFirstChild("Events")
     if not eventsFolder then return nil end
 
-    -- Recursively scan the entire Events folder for any descendant named "Chest"
     for _, item in ipairs(eventsFolder:GetDescendants()) do
         if item:IsA("Model") and item.Name == "Chest" and not processedChests[item] then
-            -- Structural sanity check: Look for your discovered "middle" part anchor
-            local targetPart = item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true)
             
+            local creditedFolder = item:FindFirstChild("Credited")
+            if creditedFolder then
+                local isMyChest = false
+                for _, credit in ipairs(creditedFolder:GetChildren()) do
+                    if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then
+                        isMyChest = true
+                        break
+                    end
+                end
+                if not isMyChest then continue end
+            end
+            
+            local targetPart = item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true)
             if targetPart then
-                -- Locate the proximity prompt inside the chest model
                 local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
                 if prompt then
                     return prompt, item, targetPart
@@ -273,7 +304,7 @@ local function getActiveFarmTarget()
 
     local enemiesList = enemiesFolder:GetChildren()
 
-    -- LAYER 1: Scan for manually starred PRIORITY targets
+    -- LAYER 1: Starred PRIORITY targets
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
@@ -297,7 +328,7 @@ local function getActiveFarmTarget()
         end
     end
 
-    -- LAYER 2: Scan for active Bosses that are turned "ON" but not starred
+    -- LAYER 2: Regular Bosses
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
@@ -314,7 +345,7 @@ local function getActiveFarmTarget()
         end
     end
 
-    -- LAYER 3: Sticky Check — Hold our active non-priority target if it's still alive
+    -- LAYER 3: Sticky Check
     if currentTarget and currentTarget.Parent == enemiesFolder then
         local mobRoot = currentTarget:FindFirstChild("HumanoidRootPart")
         local mobHum = currentTarget:FindFirstChildOfClass("Humanoid")
@@ -330,7 +361,7 @@ local function getActiveFarmTarget()
         end
     end
 
-    -- LAYER 4: Fallback Scan — Find next available standard "ON" mob
+    -- LAYER 4: Standard Mobs
     currentTarget = nil
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
@@ -368,7 +399,6 @@ RunService.RenderStepped:Connect(function()
         return 
     end
 
-    -- TOP OVERRIDE: Fly directly to Event Chest if one is present on the map
     local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
     if chestPrompt and chestModel and chestMiddlePart then
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
@@ -380,12 +410,10 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
 
-        -- Teleport 3 studs directly above the chest's discovered "middle" part
         myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 3, 0)
         return
     end
 
-    -- Standard Combat Targeting Loop
     local currentEnemy = getActiveFarmTarget()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
@@ -418,13 +446,11 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.5)
-        if FARMING_ACTIVE then
+        if FARMING_ACTIVE and CHEST_ACTIVE then
             local chestPrompt, chestModel = getActiveEventChestPrompt()
             if chestPrompt and chestModel then
-                -- Flag the chest model as processed so it leaves it alone after this execution cycle
                 processedChests[chestModel] = true
                 
-                -- Precise 10-activation execution cycle
                 for i = 1, 10 do
                     pcall(function()
                         fireproximityprompt(chestPrompt)
@@ -436,4 +462,4 @@ task.spawn(function()
     end
 end)
 
-print("Master Priority Orbital Attacher with Universal Middle-Part Chest Claim Active!")
+print("Master Priority Orbital Attacher with Fully Toggable Chest Collection Online!")
