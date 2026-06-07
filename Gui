@@ -1,0 +1,311 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+-- Remotes
+local remote = ReplicatedStorage
+    :WaitForChild("ReplicatedPackage")
+    :WaitForChild("Remotes")
+    :WaitForChild("action")
+
+-- Safe Positions & Timers
+local SAFEZONE = Vector3.new(4315, 147, -1116)
+local FLOWER_DELAY = 0.2
+local LOOP_DELAY = 50
+
+-- UI Configuration (Unified Menu)
+local gui = Instance.new("ScreenGui")
+gui.Name = "UnifiedAutomationGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 220, 0, 280)
+frame.Position = UDim2.new(0.5, -110, 0.5, -140)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 2
+frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+frame.Active = true
+frame.Parent = gui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 30)
+titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+titleLabel.Text = "Multi-Hack Control Panel"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 16
+titleLabel.Parent = frame
+
+-- Scrolling Frame for Features
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, 0, 1, -30)
+scroll.Position = UDim2.new(0, 0, 0, 30)
+scroll.BackgroundTransparency = 1
+scroll.CanvasSize = UDim2.new(0, 0, 0, 260)
+scroll.ScrollBarThickness = 6
+scroll.Parent = frame
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 5)
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = scroll
+
+-- Feature Buttons Construction
+local function createButton(text, order)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 200, 0, 45)
+    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSans
+    btn.TextSize = 16
+    btn.LayoutOrder = order
+    btn.Parent = scroll
+    return btn
+end
+
+local bWeapon = createButton("⚔️ Auto Equip: OFF", 1)
+local bSpell = createButton("✨ Auto Spells: OFF", 2)
+local bBall = createButton("🐉 Auto Dragon Ball: OFF", 3)
+local bFlower = createButton("🌸 Flower Farm: OFF", 4)
+
+-- Toggle Tracking States
+local flags = {
+    weapon = false,
+    spell = false,
+    dragonBall = false,
+    flower = false
+}
+
+-- Button Interactions
+bWeapon.MouseButton1Click:Connect(function()
+    flags.weapon = not flags.weapon
+    bWeapon.Text = flags.weapon and "⚔️ Auto Equip: ON" or "⚔️ Auto Equip: OFF"
+    bWeapon.BackgroundColor3 = flags.weapon and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
+
+bSpell.MouseButton1Click:Connect(function()
+    flags.spell = not flags.spell
+    bSpell.Text = flags.spell and "✨ Auto Spells: ON" or "✨ Auto Spells: OFF"
+    bSpell.BackgroundColor3 = flags.spell and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
+
+bBall.MouseButton1Click:Connect(function()
+    flags.dragonBall = not flags.dragonBall
+    bBall.Text = flags.dragonBall and "🐉 Auto Dragon Ball: ON" or "🐉 Auto Dragon Ball: OFF"
+    bBall.BackgroundColor3 = flags.dragonBall and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
+
+bFlower.MouseButton1Click:Connect(function()
+    flags.flower = not flags.flower
+    bFlower.Text = flags.flower and "🌸 Flower Farm: ON" or "🌸 Flower Farm: OFF"
+    bFlower.BackgroundColor3 = flags.flower and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
+
+-- Bulletproof Mobile & PC Dragging Code
+local dragging = false
+local dragStart, startPos
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- Helper Functions
+local function getRoot()
+    local char = player.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getPrompt(obj)
+    for _, v in ipairs(obj:GetDescendants()) do
+        if v:IsA("ProximityPrompt") then return v end
+    end
+    return nil
+end
+
+local function getPart(obj)
+    if obj:IsA("BasePart") then return obj end
+    for _, v in ipairs(obj:GetDescendants()) do
+        if v:IsA("BasePart") then return v end
+    end
+    return nil
+end
+
+local function getEntity()
+    local entitiesFolder = workspace:FindFirstChild("Entities")
+    if not entitiesFolder then return nil end
+    
+    local myEntity = entitiesFolder:FindFirstChild(player.Name)
+    if myEntity then return myEntity end
+
+    local myRoot = getRoot()
+    if not myRoot then return nil end
+
+    for _, entity in ipairs(entitiesFolder:GetChildren()) do
+        local root = entity:FindFirstChild("HumanoidRootPart")
+        if root and (root.Position - myRoot.Position).Magnitude < 4 then
+            return entity
+        end
+    end
+    return nil
+end
+
+-- 1 & 2. Auto Equip Weapon & Grimoire / Auto Spells Loop
+task.spawn(function()
+    while true do
+        task.wait(1)
+        pcall(function()
+            local character = player.Character
+            if not character or not character:FindFirstChildOfClass("Humanoid") or character:FindFirstChildOfClass("Humanoid").Health <= 0 then
+                return
+            end
+
+            -- Weapons / Grimoires
+            if flags.weapon then
+                local entity = getEntity()
+                if entity then
+                    if not entity:FindFirstChild("Weapon") then remote:FireServer("EquipWeapon") end
+                    if not entity:FindFirstChild("Grimoire") then remote:FireServer("Book") end
+                end
+            end
+
+            -- Spells
+            if flags.spell then
+                local backpack = player:FindFirstChild("Backpack")
+                if backpack then
+                    for _, tool in ipairs(backpack:GetChildren()) do
+                        if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" and tool.Parent == backpack then
+                            tool.Parent = character
+                            task.wait(0.1)
+                        end
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- 3. Dragon Ball Auto Collector Loop
+task.spawn(function()
+    while true do
+        task.wait(2)
+        if flags.dragonBall then
+            pcall(function()
+                local ignoreFolder = workspace:FindFirstChild("Ignore")
+                local foundBall = false
+
+                if ignoreFolder then
+                    for _, obj in ipairs(ignoreFolder:GetChildren()) do
+                        if string.match(obj.Name, "^Dragon Ball %d+$") then
+                            local part = getPart(obj)
+                            local root = getRoot()
+                            if part and root then
+                                foundBall = true
+                                root.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+                                task.wait(0.1)
+                                
+                                local prompt = getPrompt(obj)
+                                if prompt then
+                                    for i = 1, 10 do
+                                        if not flags.dragonBall then break end
+                                        fireproximityprompt(prompt)
+                                        task.wait(0.05)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+                if not foundBall and flags.dragonBall then
+                    local root = getRoot()
+                    if root then root.CFrame = CFrame.new(SAFEZONE) end
+                end
+            end)
+        end
+    end
+end)
+
+-- 4. Flower Farm Loop
+task.spawn(function()
+    while true do
+        if flags.flower then
+            pcall(function()
+                local folder = workspace:FindFirstChild("Entities")
+                folder = folder and folder:FindFirstChild("Interactions")
+                folder = folder and folder:FindFirstChild("Collectibles")
+                folder = folder and folder:FindFirstChild("Flowers")
+                
+                if not folder then return end
+
+                local HRP = getRoot()
+                if not HRP then return end
+
+                local flowers = {}
+                for _, v in ipairs(folder:GetDescendants()) do
+                    if getPrompt(v) then table.insert(flowers, v) end
+                end
+
+                table.sort(flowers, function(a, b)
+                    local aLily = a.Name:lower():find("lily") ~= nil
+                    local bLily = b.Name:lower():find("lily") ~= nil
+                    if aLily ~= bLily then return aLily end
+                    return a.Name < b.Name
+                end)
+
+                for _, flower in ipairs(flowers) do
+                    if not flags.flower then break end
+                    local part = getPart(flower)
+                    local prompt = getPrompt(flower)
+
+                    if part and prompt then
+HRP.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+local startTime = tick()
+while flags.flower and tick() - startTime < FLOWER_DELAY do
+if prompt and prompt.Parent then fireproximityprompt(prompt) end
+task.wait()
+end
+end
+end
+
+if flags.flower then
+HRP.CFrame = CFrame.new(SAFEZONE)
+local elapsed = 0
+while flags.flower and elapsed < LOOP_DELAY do
+task.wait(0.1)
+elapsed = elapsed + 0.1
+end
+end
+end)
+else
+task.wait(0.5)
+end
+end
+end)
+print("Unified Mobile UI loaded successfully!")
