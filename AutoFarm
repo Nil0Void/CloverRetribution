@@ -248,26 +248,44 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Fly & Face Attachment Loop
+-- Fly & Face Attachment Loop (Anti-Stutter Edition)
 RunService.RenderStepped:Connect(function()
-    if not FARMING_ACTIVE then return end
-
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     local myHum = character and character:FindFirstChildOfClass("Humanoid")
     
     if not myRoot or (myHum and myHum.Health <= 0) then return end
 
+    if not FARMING_ACTIVE then 
+        -- Restore regular animations and physics when farming is turned off
+        if myHum.PlatformStand then
+            myHum.PlatformStand = false
+        end
+        return 
+    end
+
     local currentEnemy = getActiveFarmTarget()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
         
-        -- 1. Calculate world offset position relative to enemy space orientation
+        -- 1. Anti-Gravity & Anti-Rubberband: Force velocity states to zero
+        myRoot.Velocity = Vector3.new(0, 0, 0)
+        myRoot.RotVelocity = Vector3.new(0, 0, 0)
+        
+        -- 2. Anti-Animation Conflict: Puts your player in a float/falling freeze frame
+        myHum.PlatformStand = true
+        
+        -- 3. Calculate target position relative to enemy space orientation
         local targetPosition = (enemyRoot.CFrame * CFrame.new(currentOffset)).Position
         
-        -- 2. Matrix Look-At forces player to rotate and face enemy directly while hovering
+        -- 4. Rotate and position seamlessly
         myRoot.CFrame = CFrame.lookAt(targetPosition, enemyRoot.Position)
+    else
+        -- If no selected mobs are actively on the map, return character to normal physics
+        if myHum.PlatformStand then
+            myHum.PlatformStand = false
+        end
     end
 end)
 
-print("Offset Attacher Panel with Face-Lock Active!")
+print("Stutter-Free Offset Attacher Panel Active!")
