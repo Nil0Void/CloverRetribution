@@ -238,7 +238,6 @@ local function getActiveFarmTarget()
         if mobRoot and mobHum and mobHum.Health > 0 then
             local lowerMobName = string.lower(mob.Name)
             
-            -- Checks if your selected keyword is a substring of the enemy's name
             for enabledBossName, isEnabled in pairs(targets.Bosses) do
                 if isEnabled and string.find(lowerMobName, string.lower(enabledBossName), 1, true) then return mob end
             end
@@ -251,7 +250,7 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Fly & Orbit Core Loop Mathematics
+-- Fly & Vertical Orbit Core Loop Mathematics
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
@@ -281,19 +280,26 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
         
-        -- Process expanded angles and distances
+        -- VERTICAL ORBITAL MATHEMATICS:
+        -- Convert the X slider value into a vertical angle calculation (radians)
         local angleRad = math.rad(currentOffset.X) 
         local radiusDistance = currentOffset.Z
-        local heightY = currentOffset.Y
+        local staticHeightAdjust = currentOffset.Y
         
-        local orbitX = math.sin(angleRad) * radiusDistance
+        -- Calculate the vertical orbit along the Y (up/down) and Z (front/back) axes
+        -- This forces the rotation to loop over the top/underneath instead of horizontally
+        local orbitY = math.sin(angleRad) * radiusDistance + staticHeightAdjust
         local orbitZ = math.cos(angleRad) * radiusDistance
+        local orbitX = 0 -- Keeps you aligned perfectly straight on the center line
         
-        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(orbitX, heightY, orbitZ)).Position
+        -- Calculate the world position offset relative to the enemy's facing direction
+        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(orbitX, orbitY, orbitZ)).Position
+        
+        -- Keep your character positioned perfectly on the vertical orbital track while face-locked
         myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
     else
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
     end
 end)
 
-print("Expanded Orbital Panel Configured!")
+print("Vertical Front-To-Back Orbit Engine Configured!")
