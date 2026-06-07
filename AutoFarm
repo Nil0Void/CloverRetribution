@@ -248,26 +248,17 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Fly & Face Attachment Loop (Smooth Camera & Anti-Shake Edition)
+-- Fly & Face Attachment Loop (Unrestricted Free Camera Edition)
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     local myHum = character and character:FindFirstChildOfClass("Humanoid")
-    local camera = workspace.CurrentCamera
     
-    if not myRoot or (myHum and myHum.Health <= 0) then 
-        if camera.CameraType == Enum.CameraType.Scriptable then
-            camera.CameraType = Enum.CameraType.Custom
-        end
-        return 
-    end
+    if not myRoot or (myHum and myHum.Health <= 0) then return end
 
     if not FARMING_ACTIVE then 
-        -- Reset everything to normal when farm is toggled off
+        -- Hand control back to the physics engine when turned off
         if myHum.PlatformStand then myHum.PlatformStand = false end
-        if camera.CameraType == Enum.CameraType.Scriptable then
-            camera.CameraType = Enum.CameraType.Custom
-        end
         return 
     end
 
@@ -275,32 +266,23 @@ RunService.RenderStepped:Connect(function()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
         
-        -- Wipe out physical velocities completely to stop falling desync
+        -- Wiping out movement and rotation velocities stops the sinking desync bug completely
         myRoot.Velocity = Vector3.new(0, 0, 0)
         myRoot.RotVelocity = Vector3.new(0, 0, 0)
+        
+        -- Freezing humanoid animation updates stops the player model from shaking the viewport
         myHum.PlatformStand = true
         
-        -- Calculate target position relative to enemy space orientation
+        -- Calculate the exact flying position offset relative to the mob's placement
         local targetPosition = (enemyRoot.CFrame * CFrame.new(currentOffset)).Position
-        local targetCFrame = CFrame.lookAt(targetPosition, enemyRoot.Position)
         
-        -- Move character
-        myRoot.CFrame = targetCFrame
-        
-        -- FORCE CAMERA SMOOTHNESS: Disconnect Roblox camera logic to stop shaking
-        camera.CameraType = Enum.CameraType.Scriptable
-        
-        -- Position the camera slightly behind your character while still facing the mob
-        local camOffset = Vector3.new(0, 4, 12) -- 4 studs up, 12 studs back
-        local cameraPos = (targetCFrame * CFrame.new(camOffset)).Position
-        camera.CFrame = CFrame.lookAt(cameraPos, enemyRoot.Position)
+        -- Snaps your body to face the mob perfectly, while leaving camera rotation fully manual
+        myRoot.CFrame = CFrame.lookAt(targetPosition, enemyRoot.Position)
     else
-        -- Return to normal camera controls if no targets are alive on screen
+        -- Safely drop character back to earth if no chosen enemies are present
         if myHum.PlatformStand then myHum.PlatformStand = false end
-        if camera.CameraType == Enum.CameraType.Scriptable then
-            camera.CameraType = Enum.CameraType.Custom
-        end
     end
 end)
 
-print("Cinematic Shake-Free Attacher Active!")
+print("Smooth Attacher Panel with Unrestricted Camera Control Active!")
+
