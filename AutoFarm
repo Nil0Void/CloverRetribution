@@ -7,28 +7,28 @@ local player = Players.LocalPlayer
 
 -- Global Targeting & Positioning State
 local FARMING_ACTIVE = false
-local currentOffset = Vector3.new(0, 5, 15) -- Default: 0 deg orbit, 5 studs high, 15 studs away
+local currentOffset = Vector3.new(0, 5, 15)
 local currentTarget = nil
 local flyAnchor = nil
 
--- Target Filtering Tables
+-- Multi-State Target Tracking Table (Saves states as "OFF", "ON", or "PRIORITY")
 local targets = {
     Mobs = {
-        ["Yeti"] = false, ["Vampire Soldier"] = false, ["Stone Guardian"] = false,
-        ["Shadow Hand Goon"] = false, ["Seasoned Mercenary"] = false, ["Riddled Skeleton Soldier"] = false,
-        ["Pumpkin"] = false, ["Wolf"] = false, ["Mage Apprentice"] = false,
-        ["Lesser Devil Juggernaut"] = false, ["Desert Claw"] = false, ["Bandit"] = false,
-        ["Wolf Hunter"] = false, ["Wind Monk"] = false, ["Lowly Goblin"] = false,
-        ["Werewolf Soldier"] = false
+        ["Yeti"] = "OFF", ["Vampire Soldier"] = "OFF", ["Stone Guardian"] = "OFF",
+        ["Shadow Hand Goon"] = "OFF", ["Seasoned Mercenary"] = "OFF", ["Riddled Skeleton Soldier"] = "OFF",
+        ["Pumpkin"] = "OFF", ["Wolf"] = "OFF", ["Mage Apprentice"] = "OFF",
+        ["Lesser Devil Juggernaut"] = "OFF", ["Desert Claw"] = "OFF", ["Bandit"] = "OFF",
+        ["Wolf Hunter"] = "OFF", ["Wind Monk"] = "OFF", ["Lowly Goblin"] = "OFF",
+        ["Werewolf Soldier"] = "OFF"
     },
     Bosses = {
-        ["Vennum"] = false, ["Alpha Wolf"] = false, ["Warlord"] = false,
-        ["Terra"] = false, ["Red"] = false, ["Alpha Desert Claw"] = false,
-        ["Apex"] = false, ["Kraken"] = false, ["The Crimson Witch"] = false,
-        ["Netherwing"] = false, ["Khamsin"] = false, ["Ice Golem"] = false,
-        ["Nyxar"] = false, ["Word Devil"] = false, ["Devil"] = false,
-        ["Medusa"] = false, ["Aetherion"] = false, ["Morningstar"] = false,
-        ["Primal Werewolf"] = false, ["Lucius"] = false
+        ["Vennum"] = "OFF", ["Alpha Wolf"] = "OFF", ["Warlord"] = "OFF",
+        ["Terra"] = "OFF", ["Red"] = "OFF", ["Alpha Desert Claw"] = "OFF",
+        ["Apex"] = "OFF", ["Kraken"] = "OFF", ["The Crimson Witch"] = "OFF",
+        ["Netherwing"] = "OFF", ["Khamsin"] = "OFF", ["Ice Golem"] = "OFF",
+        ["Nyxar"] = "OFF", ["Word Devil"] = "OFF", ["Devil"] = "OFF",
+        ["Medusa"] = "OFF", ["Aetherion"] = "OFF", ["Morningstar"] = "OFF",
+        ["Primal Werewolf"] = "OFF", ["Lucius"] = "OFF"
     }
 }
 
@@ -50,7 +50,7 @@ frame.Parent = gui
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, 0, 0, 35)
 titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-titleLabel.Text = "📐 Master Orbital Target Attacher"
+titleLabel.Text = "📐 Master Priority Orbital Attacher"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.TextSize = 16
@@ -72,7 +72,7 @@ toggleBtn.MouseButton1Click:Connect(function()
     toggleBtn.BackgroundColor3 = FARMING_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
 end)
 
--- Category Frame Generation Helper
+-- Category Frame Generation Helper (Supports Tri-State Button Cycling)
 local function createCategoryScroll(titleText, xOffset, targetSubTable)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(0, 205, 0, 220)
@@ -117,15 +117,25 @@ local function createCategoryScroll(titleText, xOffset, targetSubTable)
         mobBtn.Parent = scroll
 
         mobBtn.MouseButton1Click:Connect(function()
-            targetSubTable[mobName] = not targetSubTable[mobName]
-            if targetSubTable[mobName] then
+            local currentState = targetSubTable[mobName]
+            
+            if currentState == "OFF" then
+                targetSubTable[mobName] = "ON"
                 mobBtn.Text = mobName .. " [ON]"
                 mobBtn.BackgroundColor3 = Color3.fromRGB(56, 92, 145)
                 mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            elseif currentState == "ON" then
+                targetSubTable[mobName] = "PRIORITY"
+                mobBtn.Text = "⭐ " .. mobName .. " [PRIO]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(168, 126, 42)
+                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                currentTarget = nil -- Force retargeting calculation update
             else
+                targetSubTable[mobName] = "OFF"
                 mobBtn.Text = mobName .. " [OFF]"
                 mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
                 mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+                currentTarget = nil
             end
         end)
     end
@@ -225,7 +235,7 @@ UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
--- Target Detection Helper (With Sticky Memory & Boss Intercept Prioritization)
+-- Target Detection Helper (Partial Match + Tri-State Priority Layer Filtering)
 local function getActiveFarmTarget()
     local enemiesFolder = workspace:FindFirstChild("Entities")
     enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
@@ -234,58 +244,86 @@ local function getActiveFarmTarget()
         return nil 
     end
 
-    -- 1. Scan for Bosses first to allow priority interceptions
-    local activeBoss = nil
-    for _, mob in ipairs(enemiesFolder:GetChildren()) do
+    local enemiesList = enemiesFolder:GetChildren()
+
+    -- LAYER 1: Scan for manually starred PRIORITY targets (Absolute Highest Rank)
+    for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
         
         if mobRoot and mobHum and mobHum.Health > 0 then
             local lowerMobName = string.lower(mob.Name)
             
-            for enabledBossName, isEnabled in pairs(targets.Bosses) do
-                if isEnabled and string.find(lowerMobName, string.lower(enabledBossName), 1, true) then 
-                    activeBoss = mob
-                    break
+            -- Intercept if it matches a gold starred boss
+            for name, state in pairs(targets.Bosses) do
+                if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then
+                    currentTarget = mob
+                    return currentTarget
+                end
+            end
+            
+            -- Intercept if it matches a gold starred regular mob
+            for name, state in pairs(targets.Mobs) do
+                if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then
+                    currentTarget = mob
+                    return currentTarget
                 end
             end
         end
-        if activeBoss then break end
     end
 
-    if activeBoss then
-        currentTarget = activeBoss
-        return currentTarget
+    -- LAYER 2: Scan for active Bosses that are turned "ON" but not starred
+    for _, mob in ipairs(enemiesList) do
+        local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+        local mobHum = mob:FindFirstChildOfClass("Humanoid")
+        
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            local lowerMobName = string.lower(mob.Name)
+            
+            for name, state in pairs(targets.Bosses) do
+                if state == "ON" and string.find(lowerMobName, string.lower(name), 1, true) then
+                    currentTarget = mob
+                    return currentTarget
+                end
+            end
+        end
     end
 
-    -- 2. Keep holding the active regular mob target until finished
+    -- LAYER 3: Sticky Check — Hold our active non-priority target if it's still alive
     if currentTarget and currentTarget.Parent == enemiesFolder then
         local mobRoot = currentTarget:FindFirstChild("HumanoidRootPart")
         local mobHum = currentTarget:FindFirstChildOfClass("Humanoid")
-        
         if mobRoot and mobHum and mobHum.Health > 0 then
-            return currentTarget 
+            -- Verify it hasn't been completely toggled off mid-fight
+            local currentLower = string.lower(currentTarget.Name)
+            local isStillEnabled = false
+            
+            for name, state in pairs(targets.Mobs) do
+                if state == "ON" and string.find(currentLower, string.lower(name), 1, true) then isStillEnabled = true break end
+            end
+            
+            if isStillEnabled then return currentTarget end
         end
     end
 
-    -- 3. Fallback scan for regular mob entities
+    -- LAYER 4: Fallback Scan — Find next available standard "ON" mob
     currentTarget = nil
-
-    for _, mob in ipairs(enemiesFolder:GetChildren()) do
+    for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
         
         if mobRoot and mobHum and mobHum.Health > 0 then
             local lowerMobName = string.lower(mob.Name)
             
-            for enabledMobName, isEnabled in pairs(targets.Mobs) do
-                if isEnabled and string.find(lowerMobName, string.lower(enabledMobName), 1, true) then 
+            for name, state in pairs(targets.Mobs) do
+                if state == "ON" and string.find(lowerMobName, string.lower(name), 1, true) then
                     currentTarget = mob
-                    return mob 
+                    return currentTarget
                 end
             end
         end
     end
+
     return nil
 end
 
@@ -335,4 +373,4 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-print("Master Target Farming System Successfully Executed!")
+print("Tri-State Priority Orbital Target Panel Successfully Loaded!")
