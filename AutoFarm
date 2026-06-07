@@ -238,28 +238,23 @@ UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
--- Helper function to fetch the dynamic event chests folder contents safely
+-- Helper function to search the entire Event branch dynamically for valid chests
 local function getActiveEventChestPrompt()
     local eventsFolder = workspace:FindFirstChild("Entities")
     eventsFolder = eventsFolder and eventsFolder:FindFirstChild("Events")
     if not eventsFolder then return nil end
 
-    -- Read any active area dynamically (like Grasslands Warlord or any adjacent zones)
-    for _, zone in ipairs(eventsFolder:GetChildren()) do
-        local chestsFolder = zone:FindFirstChild("Chests")
-        if chestsFolder then
-            local children = chestsFolder:GetChildren()
-            -- Explicit constraint checking if child index position #2 is populated and loaded
-            if #children >= 2 then
-                local secondContainer = children[2] -- Fixes missing index lookup bracket
-                local actualChest = secondContainer:FindFirstChild("Chest") or secondContainer
-                
-                -- Verify we haven't already hit this exact unique model 10 times
-                if actualChest and not processedChests[actualChest] then
-                    local prompt = actualChest:FindFirstChildOfClass("ProximityPrompt") or actualChest:FindFirstChild("ProximityPrompt", true)
-                    if prompt then
-                        return prompt, actualChest
-                    end
+    -- Recursively scan the entire Events folder for any descendant named "Chest"
+    for _, item in ipairs(eventsFolder:GetDescendants()) do
+        if item:IsA("Model") and item.Name == "Chest" and not processedChests[item] then
+            -- Structural sanity check: Look for your discovered "middle" part anchor
+            local targetPart = item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true)
+            
+            if targetPart then
+                -- Locate the proximity prompt inside the chest model
+                local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
+                if prompt then
+                    return prompt, item, targetPart
                 end
             end
         end
@@ -278,7 +273,7 @@ local function getActiveFarmTarget()
 
     local enemiesList = enemiesFolder:GetChildren()
 
-    -- LAYER 1: Scan for manually starred PRIORITY targets (Absolute Highest Rank)
+    -- LAYER 1: Scan for manually starred PRIORITY targets
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
@@ -286,7 +281,6 @@ local function getActiveFarmTarget()
         if mobRoot and mobHum and mobHum.Health > 0 then
             local lowerMobName = string.lower(mob.Name)
             
-            -- Intercept if it matches a gold starred boss
             for name, state in pairs(targets.Bosses) do
                 if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then
                     currentTarget = mob
@@ -294,7 +288,6 @@ local function getActiveFarmTarget()
                 end
             end
             
-            -- Intercept if it matches a gold starred regular mob
             for name, state in pairs(targets.Mobs) do
                 if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then
                     currentTarget = mob
@@ -326,7 +319,6 @@ local function getActiveFarmTarget()
         local mobRoot = currentTarget:FindFirstChild("HumanoidRootPart")
         local mobHum = currentTarget:FindFirstChildOfClass("Humanoid")
         if mobRoot and mobHum and mobHum.Health > 0 then
-            -- Verify it hasn't been completely toggled off mid-fight
             local currentLower = string.lower(currentTarget.Name)
             local isStillEnabled = false
             
@@ -376,9 +368,9 @@ RunService.RenderStepped:Connect(function()
         return 
     end
 
-    -- TOP OVERRIDE: Check if an Event Chest has spawned on the map [INDEX]
-    local chestPrompt, chestModel = getActiveEventChestPrompt()
-    if chestPrompt and chestModel then
+    -- TOP OVERRIDE: Fly directly to Event Chest if one is present on the map
+    local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
+    if chestPrompt and chestModel and chestMiddlePart then
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
             if flyAnchor then flyAnchor:Destroy() end
             flyAnchor = Instance.new("BodyVelocity")
@@ -388,10 +380,8 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
 
-        local chestPart = chestModel:IsA("BasePart") and chestModel or chestModel:FindFirstChildWhichIsA("BasePart", true)
-        if chestPart then
-            myRoot.CFrame = chestPart.CFrame * CFrame.new(0, 3, 0)
-        end
+        -- Teleport 3 studs directly above the chest's discovered "middle" part
+        myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 3, 0)
         return
     end
 
@@ -431,8 +421,10 @@ task.spawn(function()
         if FARMING_ACTIVE then
             local chestPrompt, chestModel = getActiveEventChestPrompt()
             if chestPrompt and chestModel then
+                -- Flag the chest model as processed so it leaves it alone after this execution cycle
                 processedChests[chestModel] = true
                 
+                -- Precise 10-activation execution cycle
                 for i = 1, 10 do
                     pcall(function()
                         fireproximityprompt(chestPrompt)
@@ -444,4 +436,4 @@ task.spawn(function()
     end
 end)
 
-print("Master Priority Orbital Attacher with Auto Chest Claim Active!")
+print("Master Priority Orbital Attacher with Universal Middle-Part Chest Claim Active!")
