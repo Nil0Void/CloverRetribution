@@ -8,6 +8,7 @@ local player = Players.LocalPlayer
 -- Global Targeting & Positioning State
 local FARMING_ACTIVE = false
 local currentOffset = Vector3.new(0, 5, 15) -- Default: 0 deg orbit, 5 studs high, 15 studs away
+local currentTarget = nil
 local flyAnchor = nil
 
 -- Target Filtering Tables
@@ -33,7 +34,7 @@ local targets = {
 
 -- Core GUI Construction
 local gui = Instance.new("ScreenGui")
-gui.Name = "MobSelectorAndSliderGui"
+gui.Name = "MasterOrbitalFarmingGui"
 gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
@@ -49,7 +50,7 @@ frame.Parent = gui
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, 0, 0, 35)
 titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-titleLabel.Text = "📐 Orbital Face-Lock Attacher"
+titleLabel.Text = "📐 Master Orbital Target Attacher"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.TextSize = 16
@@ -134,7 +135,7 @@ end
 createCategoryScroll("⚔️ Mobs Category", 10, targets.Mobs)
 createCategoryScroll("👹 Bosses & Elites", 225, targets.Bosses)
 
--- Slider Construction Module with Expanded Ranges
+-- Slider Construction Module
 local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -20, 0, 20)
@@ -203,12 +204,11 @@ local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
     end)
 end
 
--- Render Restructured Expanded Sliders
-createSlider("🔄 Orbit Position", -180, 180, 0, 320) -- Full 360-degree rotation circle around mob
-createSlider("📐 Height", -20, 30, 5, 370)          -- Floats up to 30 studs high or 20 studs below
-createSlider("📏 Distance", 0, 50, 15, 420)         -- Range expanded smoothly out to 50 studs away
+createSlider("🔄 Orbit Position", -180, 180, 0, 320)
+createSlider("📐 Height", -20, 30, 5, 370)
+createSlider("📏 Distance", 0, 50, 15, 420)
 
--- UI Dragging Framework
+-- UI Mobile & Desktop Dragging Framework
 local dragging, dragStart, startPos = false, nil, nil
 frame.InputBegan:Connect(function(input)
     if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then
@@ -225,12 +225,17 @@ UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
--- Target Detection Helper (Partial Match)
+-- Target Detection Helper (With Sticky Memory & Boss Intercept Prioritization)
 local function getActiveFarmTarget()
     local enemiesFolder = workspace:FindFirstChild("Entities")
     enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
-    if not enemiesFolder then return nil end
+    if not enemiesFolder then 
+        currentTarget = nil
+        return nil 
+    end
 
+    -- 1. Scan for Bosses first to allow priority interceptions
+    local activeBoss = nil
     for _, mob in ipairs(enemiesFolder:GetChildren()) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
@@ -239,18 +244,52 @@ local function getActiveFarmTarget()
             local lowerMobName = string.lower(mob.Name)
             
             for enabledBossName, isEnabled in pairs(targets.Bosses) do
-                if isEnabled and string.find(lowerMobName, string.lower(enabledBossName), 1, true) then return mob end
+                if isEnabled and string.find(lowerMobName, string.lower(enabledBossName), 1, true) then 
+                    activeBoss = mob
+                    break
+                end
             end
+        end
+        if activeBoss then break end
+    end
+
+    if activeBoss then
+        currentTarget = activeBoss
+        return currentTarget
+    end
+
+    -- 2. Keep holding the active regular mob target until finished
+    if currentTarget and currentTarget.Parent == enemiesFolder then
+        local mobRoot = currentTarget:FindFirstChild("HumanoidRootPart")
+        local mobHum = currentTarget:FindFirstChildOfClass("Humanoid")
+        
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            return currentTarget 
+        end
+    end
+
+    -- 3. Fallback scan for regular mob entities
+    currentTarget = nil
+
+    for _, mob in ipairs(enemiesFolder:GetChildren()) do
+        local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+        local mobHum = mob:FindFirstChildOfClass("Humanoid")
+        
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            local lowerMobName = string.lower(mob.Name)
             
             for enabledMobName, isEnabled in pairs(targets.Mobs) do
-                if isEnabled and string.find(lowerMobName, string.lower(enabledMobName), 1, true) then return mob end
+                if isEnabled and string.find(lowerMobName, string.lower(enabledMobName), 1, true) then 
+                    currentTarget = mob
+                    return mob 
+                end
             end
         end
     end
     return nil
 end
 
--- Fly & Vertical Orbit Core Loop Mathematics
+-- Fly & Vertical Orbit Loop
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
@@ -263,6 +302,7 @@ RunService.RenderStepped:Connect(function()
 
     if not FARMING_ACTIVE then 
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+        currentTarget = nil 
         return 
     end
 
@@ -270,7 +310,6 @@ RunService.RenderStepped:Connect(function()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
         
-        -- Create a bulletproof physics anchor to stop all screen shaking and drifting
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
             if flyAnchor then flyAnchor:Destroy() end
             flyAnchor = Instance.new("BodyVelocity")
@@ -280,26 +319,20 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
         
-        -- VERTICAL ORBITAL MATHEMATICS:
-        -- Convert the X slider value into a vertical angle calculation (radians)
+        -- Front-To-Back Vertical Orbit calculations
         local angleRad = math.rad(currentOffset.X) 
         local radiusDistance = currentOffset.Z
         local staticHeightAdjust = currentOffset.Y
         
-        -- Calculate the vertical orbit along the Y (up/down) and Z (front/back) axes
-        -- This forces the rotation to loop over the top/underneath instead of horizontally
         local orbitY = math.sin(angleRad) * radiusDistance + staticHeightAdjust
         local orbitZ = math.cos(angleRad) * radiusDistance
-        local orbitX = 0 -- Keeps you aligned perfectly straight on the center line
+        local orbitX = 0 
         
-        -- Calculate the world position offset relative to the enemy's facing direction
         local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(orbitX, orbitY, orbitZ)).Position
-        
-        -- Keep your character positioned perfectly on the vertical orbital track while face-locked
         myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
     else
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
     end
 end)
 
-print("Vertical Front-To-Back Orbit Engine Configured!")
+print("Master Target Farming System Successfully Executed!")
