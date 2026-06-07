@@ -229,6 +229,9 @@ UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
+-- Keeps track of our physics anchor object
+local flyAnchor = nil
+
 -- Target Detection Helper
 local function getActiveFarmTarget()
     local enemiesFolder = workspace:FindFirstChild("Entities")
@@ -248,17 +251,23 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Fly & Face Attachment Loop (Unrestricted Free Camera Edition)
+-- Fly & Face Attachment Loop (Smooth Physics Anchor Edition)
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     local myHum = character and character:FindFirstChildOfClass("Humanoid")
     
-    if not myRoot or (myHum and myHum.Health <= 0) then return end
+    if not myRoot or (myHum and myHum.Health <= 0) then 
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+        return 
+    end
 
+    -- If farming is turned off, safely clean up the physics anchor
     if not FARMING_ACTIVE then 
-        -- Hand control back to the physics engine when turned off
-        if myHum.PlatformStand then myHum.PlatformStand = false end
+        if flyAnchor then 
+            flyAnchor:Destroy() 
+            flyAnchor = nil 
+        end
         return 
     end
 
@@ -266,23 +275,28 @@ RunService.RenderStepped:Connect(function()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
         
-        -- Wiping out movement and rotation velocities stops the sinking desync bug completely
-        myRoot.Velocity = Vector3.new(0, 0, 0)
-        myRoot.RotVelocity = Vector3.new(0, 0, 0)
+        -- CREATE PHYSICS ANCHOR: This mimics standard fly scripts to stop all drifting/shaking
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.Name = "AntiDriftAnchor"
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge) -- Overpowers gravity completely
+            flyAnchor.Velocity = Vector3.new(0, 0, 0) -- Forces your character to stand completely still in the air
+            flyAnchor.Parent = myRoot
+        end
         
-        -- Freezing humanoid animation updates stops the player model from shaking the viewport
-        myHum.PlatformStand = true
-        
-        -- Calculate the exact flying position offset relative to the mob's placement
+        -- 1. Calculate world offset position relative to enemy space orientation
         local targetPosition = (enemyRoot.CFrame * CFrame.new(currentOffset)).Position
         
-        -- Snaps your body to face the mob perfectly, while leaving camera rotation fully manual
+        -- 2. Matrix Look-At forces player to rotate and face enemy directly while hovering
         myRoot.CFrame = CFrame.lookAt(targetPosition, enemyRoot.Position)
     else
-        -- Safely drop character back to earth if no chosen enemies are present
-        if myHum.PlatformStand then myHum.PlatformStand = false end
+        -- Clean up if your target dies and no other selected enemies are nearby
+        if flyAnchor then 
+            flyAnchor:Destroy() 
+            flyAnchor = nil 
+        end
     end
 end)
 
-print("Smooth Attacher Panel with Unrestricted Camera Control Active!")
-
+print("Drift-Free Physics Anchor Attacher Active!")
