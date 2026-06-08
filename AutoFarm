@@ -16,8 +16,8 @@ local flyAnchor = nil
 
 local activeChestsCache = {}
 local chestVisitTimers = {}
+local chestVisitCounts = {}
 local currentChestIndex = nil
-
 
 -- Tracked Chest Memory
 local processedChests = {}
@@ -255,13 +255,9 @@ local function createSlider(axisName, minVal, maxVal, defaultStartVal, yOffset)
 
     local function refreshSliderVisuals()
         local liveValue = defaultStartVal
-        if axisName == "🔄 Orbit Position" then
-            liveValue = currentOffset.X
-        elseif axisName == "📐 Height" then
-            liveValue = currentOffset.Y
-        elseif axisName == "📏 Distance" then
-            liveValue = currentOffset.Z
-        end
+        if axisName == "🔄 Orbit Position" then liveValue = currentOffset.X
+        elseif axisName == "📐 Height" then liveValue = currentOffset.Y
+        elseif axisName == "📏 Distance" then liveValue = currentOffset.Z end
 
         label.Text = axisName .. ": " .. tostring(liveValue) .. suffix
         local pct = (liveValue - minVal) / (maxVal - minVal)
@@ -270,110 +266,73 @@ local function createSlider(axisName, minVal, maxVal, defaultStartVal, yOffset)
     refreshSliderVisuals()
 
     local activeDragging = false
-
     local function updateSliderPosition(inputPosition)
         local barAbsPos = sliderBg.AbsolutePosition.X
         local barAbsSize = sliderBg.AbsoluteSize.X
         local clmp = math.clamp((inputPosition.X - barAbsPos) / barAbsSize, 0, 1)
-        
         local value = math.round(minVal + (clmp * (maxVal - minVal)))
         
-        if axisName == "🔄 Orbit Position" then
-            currentOffset = Vector3.new(value, currentOffset.Y, currentOffset.Z)
-        elseif axisName == "📐 Height" then
-            currentOffset = Vector3.new(currentOffset.X, value, currentOffset.Z)
-        elseif axisName == "📏 Distance" then
-            currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, value)
-        end
+        if axisName == "🔄 Orbit Position" then currentOffset = Vector3.new(value, currentOffset.Y, currentOffset.Z)
+        elseif axisName == "📐 Height" then currentOffset = Vector3.new(currentOffset.X, value, currentOffset.Z)
+        elseif axisName == "📏 Distance" then currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, value) end
         
         refreshSliderVisuals()
         saveConfig()
     end
 
-    sliderBtn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            activeDragging = true
-        end
-    end)
-
-    UIS.InputChanged:Connect(function(input)
-        if activeDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            updateSliderPosition(input.Position)
-        end
-    end)
-
-    UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            activeDragging = false
-        end
-    end)
+    sliderBtn.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then activeDragging = true end end)
+    UIS.InputChanged:Connect(function(input) if activeDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then updateSliderPosition(input.Position) end end)
+    UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then activeDragging = false end end)
 end
 
--- Sliders configuration
 createSlider("🔄 Orbit Position", -180, 180, 0, 360)
 createSlider("📐 Height", -20, 30, 5, 410)
 createSlider("📏 Distance", 0, 50, 15, 460)
 
 -- UI Mobile & Desktop Dragging Framework
 local dragging, dragStart, startPos = false, nil, nil
-frame.InputBegan:Connect(function(input)
-    if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then
-        dragging, dragStart, startPos = true, input.Position, frame.Position
-    end
-end)
-UIS.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-UIS.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
-end)
+frame.InputBegan:Connect(function(input) if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then dragging, dragStart, startPos = true, input.Position, frame.Position end end)
+UIS.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then local delta = input.Position - dragStart frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
+UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
 
 -- Real-time folder hook listens for chest spawns instantly
 local function monitorWorkspaceEvents()
     local eventsFolder = workspace:FindFirstChild("Entities")
     eventsFolder = eventsFolder and eventsFolder:FindFirstChild("Events")
     if not eventsFolder then return end
-    
-    eventsFolder.DescendantAdded:Connect(function(descendant)
-        if descendant:IsA("Model") and descendant.Name == "Chest" then
-            table.insert(activeChestsCache, descendant)
-        end
-    end)
-    
-    for _, descendant in ipairs(eventsFolder:GetDescendants()) do
-        if descendant:IsA("Model") and descendant.Name == "Chest" then
-            table.insert(activeChestsCache, descendant)
-        end
-    end
+    eventsFolder.DescendantAdded:Connect(function(descendant) if descendant:IsA("Model") and descendant.Name == "Chest" then table.insert(activeChestsCache, descendant) end end)
+    for _, descendant in ipairs(eventsFolder:GetDescendants()) do if descendant:IsA("Model") and descendant.Name == "Chest" then table.insert(activeChestsCache, descendant) end end
 end
 task.spawn(monitorWorkspaceEvents)
 
--- ✅ FIXED: Optimized to reference the 3-second rapid cycling table smoothly [INDEX]
+-- Helper function to fetch the next valid chest in our cycling queue
 local function getActiveEventChestPrompt()
     if not CHEST_ACTIVE then return nil end
 
     local validChests = {}
     
+    -- 1. Parse cache and filter out chests that have already completed 2 rounds
     for i = #activeChestsCache, 1, -1 do
         local item = activeChestsCache[i]
         
         if not item or not item.Parent then
             chestVisitTimers[item] = nil 
+            chestVisitCounts[item] = nil -- Clear round limits from memory upon despawn
             table.remove(activeChestsCache, i)
             continue
         end
 
+        -- HARD CAP OVERRIDE: If this chest completed 2 full 3-second rounds, ignore it forever [INDEX]
+        if chestVisitCounts[item] and chestVisitCounts[item] >= 2 then
+            continue
+        end
+
+        -- Credit Tracker Verification Layer
         local creditedFolder = item:FindFirstChild("Credited")
         if creditedFolder then
             local isMyChest = false
             for _, credit in ipairs(creditedFolder:GetChildren()) do
-                if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then
-                    isMyChest = true
-                    break
-                end
+                if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then isMyChest = true break end
             end
             if not isMyChest then continue end
         end
@@ -391,59 +350,66 @@ local function getActiveEventChestPrompt()
         return nil
     end
 
+    -- 2. Verify if our active selection is still within its 3-second loop burst window
     if currentChestIndex and currentChestIndex <= #validChests then
         local activeSelection = validChests[currentChestIndex]
         local startTime = chestVisitTimers[activeSelection.model]
         
         if startTime and (os.clock() - startTime) < 3 then
             return activeSelection.prompt, activeSelection.model, activeSelection.part
+        elseif startTime then
+            -- 3-second window just expired! Finalize this round and increment counter [INDEX]
+            chestVisitCounts[activeSelection.model] = (chestVisitCounts[activeSelection.model] or 0) + 1
+            chestVisitTimers[activeSelection.model] = nil -- Reset timer stamp for the next visit
         end
     end
 
+    -- 3. Cycle to the next available chest index carousel point
     local nextIndex = 1
     if currentChestIndex then
         nextIndex = (currentChestIndex % #validChests) + 1
     end
 
-    local nextSelection = validChests[nextIndex]
-    currentChestIndex = nextIndex
-    chestVisitTimers[nextSelection.model] = os.clock()
+    -- Double check if the next target has already hit its 2-round cap
+    local loopsChecked = 0
+    while loopsChecked < #validChests do
+        local checkSelection = validChests[nextIndex]
+        if not chestVisitCounts[checkSelection.model] or chestVisitCounts[checkSelection.model] < 2 then
+            break -- Found a valid target that hasn't completed 2 rounds
+        end
+        nextIndex = (nextIndex % #validChests) + 1
+        loopsChecked = loopsChecked + 1
+    end
 
-    return nextSelection.prompt, nextSelection.model, nextSelection.part
+    local finalSelection = validChests[nextIndex]
+    
+    -- If even the next cycled option has already completed 2 rounds, go back to mobs
+    if chestVisitCounts[finalSelection.model] and chestVisitCounts[finalSelection.model] >= 2 then
+        currentChestIndex = nil
+        return nil
+    end
+
+    currentChestIndex = nextIndex
+    chestVisitTimers[finalSelection.model] = os.clock() -- Initialize 3-second clock [INDEX]
+
+    return finalSelection.prompt, finalSelection.model, finalSelection.part
 end
 
 -- Target Detection Helper (Partial Match + Tri-State Priority Layer Filtering)
 local function getActiveFarmTarget()
     local enemiesFolder = workspace:FindFirstChild("Entities")
     enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
-    if not enemiesFolder then 
-        currentTarget = nil
-        return nil 
-    end
-
+    if not enemiesFolder then currentTarget = nil return nil end
     local enemiesList = enemiesFolder:GetChildren()
 
     -- LAYER 1: Starred PRIORITY targets
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
-        
         if mobRoot and mobHum and mobHum.Health > 0 then
             local lowerMobName = string.lower(mob.Name)
-            
-            for name, state in pairs(targets.Bosses) do
-                if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then
-                    currentTarget = mob
-                    return currentTarget
-                end
-            end
-            
-            for name, state in pairs(targets.Mobs) do
-                if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then
-                    currentTarget = mob
-                    return currentTarget
-                end
-            end
+            for name, state in pairs(targets.Bosses) do if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then currentTarget = mob return currentTarget end end
+            for name, state in pairs(targets.Mobs) do if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then currentTarget = mob return currentTarget end end
         end
     end
 
@@ -451,16 +417,9 @@ local function getActiveFarmTarget()
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
-        
         if mobRoot and mobHum and mobHum.Health > 0 then
             local lowerMobName = string.lower(mob.Name)
-            
-            for name, state in pairs(targets.Bosses) do
-                if state == "ON" and string.find(lowerMobName, string.lower(name), 1, true) then
-                    currentTarget = mob
-                    return currentTarget
-                end
-            end
+            for name, state in pairs(targets.Bosses) do if state == "ON" and string.find(lowerMobName, string.lower(name), 1, true) then currentTarget = mob return currentTarget end end
         end
     end
 
@@ -471,11 +430,7 @@ local function getActiveFarmTarget()
         if mobRoot and mobHum and mobHum.Health > 0 then
             local currentLower = string.lower(currentTarget.Name)
             local isStillEnabled = false
-            
-            for name, state in pairs(targets.Mobs) do
-                if state == "ON" and string.find(currentLower, string.lower(name), 1, true) then isStillEnabled = true break end
-            end
-            
+            for name, state in pairs(targets.Mobs) do if state == "ON" and string.find(currentLower, string.lower(name), 1, true) then isStillEnabled = true break end end
             if isStillEnabled then return currentTarget end
         end
     end
@@ -485,19 +440,11 @@ local function getActiveFarmTarget()
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
-        
         if mobRoot and mobHum and mobHum.Health > 0 then
             local lowerMobName = string.lower(mob.Name)
-            
-            for name, state in pairs(targets.Mobs) do
-                if state == "ON" and string.find(lowerMobName, string.lower(name), 1, true) then
-                    currentTarget = mob
-                    return currentTarget
-                end
-            end
+            for name, state in pairs(targets.Mobs) do if state == "ON" and string.find(lowerMobName, string.lower(name), 1, true) then currentTarget = mob return currentTarget end end
         end
     end
-
     return nil
 end
 
@@ -507,18 +454,10 @@ RunService.RenderStepped:Connect(function()
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     local myHum = character and character:FindFirstChildOfClass("Humanoid")
     
-    if not myRoot or (myHum and myHum.Health <= 0) then 
-        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
-        return 
-    end
+    if not myRoot or (myHum and myHum.Health <= 0) then if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end return end
+    if not FARMING_ACTIVE then if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end currentTarget = nil return end
 
-    if not FARMING_ACTIVE then 
-        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
-        currentTarget = nil 
-        return 
-    end
-
-    -- CHEST QUEUE OVERRIDE LATCH: Handles the fast-cycling CFrame switches
+    -- CHEST QUEUE OVERRIDE LATCH
     local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
     if chestPrompt and chestModel and chestMiddlePart then
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
@@ -529,16 +468,14 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Velocity = Vector3.new(0, 0, 0)
             flyAnchor.Parent = myRoot
         end
-
         myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 2, 0)
         return
     end
 
-    -- Standard Combat Targeting Loop (Runs smoothly if NO valid chests remain)
+    -- Standard Combat Targeting Loop
     local currentEnemy = getActiveFarmTarget()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
-        
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
             if flyAnchor then flyAnchor:Destroy() end
             flyAnchor = Instance.new("BodyVelocity")
@@ -547,16 +484,12 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Velocity = Vector3.new(0, 0, 0)
             flyAnchor.Parent = myRoot
         end
-        
         local angleRad = math.rad(currentOffset.X) 
         local radiusDistance = currentOffset.Z
         local staticHeightAdjust = currentOffset.Y
-        
         local orbitY = math.sin(angleRad) * radiusDistance + staticHeightAdjust
         local orbitZ = math.cos(angleRad) * radiusDistance
-        local orbitX = 0 
-        
-        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(orbitX, orbitY, orbitZ)).Position
+        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(0, orbitY, orbitZ)).Position
         myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
     else
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
@@ -570,15 +503,13 @@ task.spawn(function()
         if FARMING_ACTIVE and CHEST_ACTIVE then
             local chestPrompt, chestModel = getActiveEventChestPrompt()
             if chestPrompt and chestModel then
-                pcall(function()
-                    fireproximityprompt(chestPrompt)
-                end)
+                pcall(function() fireproximityprompt(chestPrompt) end)
             end
         end
     end
 end)
 
--- Anti-AFK Engine Module (Prevents 20-minute idle kicks)
+-- Anti-AFK Engine Module
 local VirtualUser = game:GetService("VirtualUser")
 player.Idled:Connect(function()
     pcall(function()
@@ -588,4 +519,4 @@ player.Idled:Connect(function()
     end)
 end)
 
-print("Master Priority Orbital Attacher with Fully Toggable Chest Collection Online!")
+print("2-Round Multi-Chest 3s Limit Sweeper Configured!")
