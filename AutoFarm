@@ -490,4 +490,14 @@ task.spawn(function()
     end
 end)
 
+-- Anti-AFK Engine Module (Prevents 20-minute idle kicks)
+local VirtualUser = game:GetService("VirtualUser")
+player.Idled:Connect(function()
+    pcall(function()
+        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    end)
+end)
+
 print("Master Priority Orbital Attacher with Fully Toggable Chest Collection Online!")
