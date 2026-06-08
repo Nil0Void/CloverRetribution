@@ -2,8 +2,10 @@ local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService") -- Added for save management
 
 local player = Players.LocalPlayer
+local FILE_NAME = "MasterOrbitalConfig.json"
 
 -- Global Targeting & Positioning State
 local FARMING_ACTIVE = false
@@ -35,6 +37,33 @@ local targets = {
         ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF", ["Vampire Elite"] = "OFF"
     }
 }
+
+local function saveConfig()
+    if not writefile then return end
+    pcall(function()
+        writefile(FILE_NAME, HttpService:JSONEncode({
+            FARMING_ACTIVE = FARMING_ACTIVE,
+            CHEST_ACTIVE = CHEST_ACTIVE,
+            currentOffset = {currentOffset.X, currentOffset.Y, currentOffset.Z},
+            targets = targets
+        }))
+    end)
+end
+
+local function loadConfig()
+    pcall(function()
+        if readfile and isfile and isfile(FILE_NAME) then
+            local data = HttpService:JSONDecode(readfile(FILE_NAME))
+            if data then
+                FARMING_ACTIVE = data.FARMING_ACTIVE
+                CHEST_ACTIVE = data.CHEST_ACTIVE
+                currentOffset = Vector3.new(data.currentOffset[1], data.currentOffset[2], data.currentOffset[3])
+                targets = data.targets
+            end
+        end
+    end)
+end
+loadConfig() -- Runs instantly to overwrite default values with your saved profile
 
 -- Core GUI Construction
 local gui = Instance.new("ScreenGui")
@@ -75,6 +104,7 @@ toggleBtn.MouseButton1Click:Connect(function()
     FARMING_ACTIVE = not FARMING_ACTIVE
     toggleBtn.Text = FARMING_ACTIVE and "Master Auto Farm: ON" or "Master Auto Farm: OFF"
     toggleBtn.BackgroundColor3 = FARMING_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    saveConfig() -- Saves configuration state to local file storage
 end)
 
 -- Chest Farm Control Button
@@ -92,6 +122,7 @@ chestBtn.MouseButton1Click:Connect(function()
     CHEST_ACTIVE = not CHEST_ACTIVE
     chestBtn.Text = CHEST_ACTIVE and "🎁 Auto Chests: ON" or "🎁 Auto Chests: OFF"
     chestBtn.BackgroundColor3 = CHEST_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    saveConfig()
 end)
 
 -- Category Frame Generation Helper
@@ -159,6 +190,7 @@ local function createCategoryScroll(titleText, xOffset, targetSubTable)
                 mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
                 currentTarget = nil
             end
+            saveConfig()
         end)
     end
     scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
@@ -215,6 +247,7 @@ local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
         elseif axisName == "📏 Distance" then
             currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, value)
         end
+        saveConfig()
     end
 
     sliderBtn.InputBegan:Connect(function(input)
@@ -388,14 +421,9 @@ RunService.RenderStepped:Connect(function()
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     local myHum = character and character:FindFirstChildOfClass("Humanoid")
     
-    if not myRoot or (myHum and myHum.Health <= 0) then 
+    if not myRoot or (myHum and myHum.Health <= 0) or not FARMING_ACTIVE then 
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
-        return 
-    end
-
-    if not FARMING_ACTIVE then 
-        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
-        currentTarget = nil 
+        currentTarget = nil
         return 
     end
 
