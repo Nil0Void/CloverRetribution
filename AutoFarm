@@ -327,7 +327,7 @@ UIS.InputEnded:Connect(function(input)
 end)
 
 local function getActiveEventChestPrompt()
-    if not CHECH_ACTIVE or not CHEST_ACTIVE then return nil end
+    if not CHEST_ACTIVE then return nil end
 
     local eventsFolder = workspace:FindFirstChild("Entities")
     eventsFolder = eventsFolder and eventsFolder:FindFirstChild("Events")
