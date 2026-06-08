@@ -361,6 +361,99 @@ local function getActiveEventChestPrompt()
     return nil
 end
 
+-- Global Event Cache Tracker
+local activeChestsCache = {}
+-- Tracks the last time (via os.clock) we started a 3-second burst on a chest
+local chestVisitTimers = {}
+-- Tracks the index of the chest we are currently focusing on
+local currentChestIndex = nil
+
+-- Real-time folder hook listens for chest spawns instantly
+local function monitorWorkspaceEvents()
+    local eventsFolder = workspace:FindFirstChild("Entities")
+    eventsFolder = eventsFolder and eventsFolder:FindFirstChild("Events")
+    if not eventsFolder then return end
+    
+    eventsFolder.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("Model") and descendant.Name == "Chest" then
+            table.insert(activeChestsCache, descendant)
+        end
+    end)
+    
+    for _, descendant in ipairs(eventsFolder:GetDescendants()) do
+        if descendant:IsA("Model") and descendant.Name == "Chest" then
+            table.insert(activeChestsCache, descendant)
+        end
+    end
+end
+task.spawn(monitorWorkspaceEvents)
+
+-- Helper function to fetch the next valid chest in our cycling queue
+local function getActiveEventChestPrompt()
+    if not CHEST_ACTIVE then return nil end
+
+    local validChests = {}
+    
+    -- 1. Clean the cache and find all valid chests belonging to you
+    for i = #activeChestsCache, 1, -1 do
+        local item = activeChestsCache[i]
+        
+        if not item or not item.Parent then
+            chestVisitTimers[item] = nil -- Wipe memory if it despawned
+            table.remove(activeChestsCache, i)
+            continue
+        end
+
+        -- Credit Tracker Verification Layer
+        local creditedFolder = item:FindFirstChild("Credited")
+        if creditedFolder then
+            local isMyChest = false
+            for _, credit in ipairs(creditedFolder:GetChildren()) do
+                if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then
+                    isMyChest = true
+                    break
+                end
+            end
+            if not isMyChest then continue end
+        end
+
+        local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
+        local targetPart = prompt and (prompt.Parent:IsA("BasePart") and prompt.Parent or item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true))
+        
+        if prompt and targetPart then
+            table.insert(validChests, {prompt = prompt, model = item, part = targetPart})
+        end
+    end
+
+    if #validChests == 0 then
+        currentChestIndex = nil
+        return nil
+    end
+
+    -- 2. Check if our currently active chest has finished its 3-second burst
+    if currentChestIndex and currentChestIndex <= #validChests then
+        local activeSelection = validChests[currentChestIndex]
+        local startTime = chestVisitTimers[activeSelection.model]
+        
+        if startTime and (os.clock() - startTime) < 3 then
+            -- Still within the 3-second window, keep focusing this chest
+            return activeSelection.prompt, activeSelection.model, activeSelection.part
+        end
+    end
+
+    -- 3. Cycle to the next chest in line (or wrap around to the first one)
+    local nextIndex = 1
+    if currentChestIndex then
+        nextIndex = (currentChestIndex % #validChests) + 1
+    end
+
+    local nextSelection = validChests[nextIndex]
+    currentChestIndex = nextIndex
+    chestVisitTimers[nextSelection.model] = os.clock() -- Set the 3-second countdown anchor
+
+    return nextSelection.prompt, nextSelection.model, nextSelection.part
+end
+
 -- Target Detection Helper (Partial Match + Tri-State Priority Layer Filtering)
 local function getActiveFarmTarget()
     local enemiesFolder = workspace:FindFirstChild("Entities")
@@ -467,7 +560,7 @@ RunService.RenderStepped:Connect(function()
         return 
     end
 
-    -- ABSOLUTE TOP PRIORITY: Intercept chest first and skip enemy code entirely
+    -- CHEST QUEUE OVERRIDE LATCH: Handles the fast-cycling CFrame switches
     local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
     if chestPrompt and chestModel and chestMiddlePart then
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
@@ -479,12 +572,11 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
 
-        -- Teleport instantly to the chest and exit the RenderStepped frame execution
-        myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 3, 0)
+        myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 2, 0)
         return
     end
 
-    -- Standard Combat Targeting Loop (Only runs if NO chest is active)
+    -- Standard Combat Targeting Loop (Runs smoothly if NO valid chests remain)
     local currentEnemy = getActiveFarmTarget()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
@@ -513,21 +605,16 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Dedicated Async Thread for Chest Claim Processing & Interaction Spam
+-- Uncapped Frame-Rate Synced Prompt Interaction Loop
 task.spawn(function()
     while true do
-        task.wait(0.1) 
+        RunService.Heartbeat:Wait()
         if FARMING_ACTIVE and CHEST_ACTIVE then
-            local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
+            local chestPrompt, chestModel = getActiveEventChestPrompt()
             if chestPrompt and chestModel then
-                processedChests[chestModel] = true
-                
-                for i = 1, 10 do
-                    pcall(function()
-                        fireproximityprompt(chestPrompt)
-                    end)
-                    task.wait(0.05)
-                end
+                pcall(function()
+                    fireproximityprompt(chestPrompt)
+                end)
             end
         end
     end
