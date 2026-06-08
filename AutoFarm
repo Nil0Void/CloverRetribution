@@ -2,14 +2,14 @@ local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService") -- Added for save management
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local FILE_NAME = "MasterOrbitalConfig.json"
 
 -- Global Targeting & Positioning State
 local FARMING_ACTIVE = false
-local CHEST_ACTIVE = false -- Managed by the new chest toggle button
+local CHEST_ACTIVE = false 
 local currentOffset = Vector3.new(0, 5, 15)
 local currentTarget = nil
 local flyAnchor = nil
@@ -58,12 +58,21 @@ local function loadConfig()
                 FARMING_ACTIVE = data.FARMING_ACTIVE
                 CHEST_ACTIVE = data.CHEST_ACTIVE
                 currentOffset = Vector3.new(data.currentOffset[1], data.currentOffset[2], data.currentOffset[3])
-                targets = data.targets
+                
+                -- BUG FIX #1: Ensure data-dictionary entries map back directly as clean uppercase strings [INDEX]
+                if data.targets then
+                    if data.targets.Mobs then
+                        for k, v in pairs(data.targets.Mobs) do if targets.Mobs[k] then targets.Mobs[k] = tostring(v) end end
+                    end
+                    if data.targets.Bosses then
+                        for k, v in pairs(data.targets.Bosses) do if targets.Bosses[k] then targets.Bosses[k] = tostring(v) end end
+                    end
+                end
             end
         end
     end)
 end
-loadConfig() -- Runs instantly to overwrite default values with your saved profile
+loadConfig() 
 
 -- Core GUI Construction
 local gui = Instance.new("ScreenGui")
@@ -72,7 +81,7 @@ gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 440, 0, 530) -- Height adjusted slightly for the extra button row
+frame.Size = UDim2.new(0, 440, 0, 530) 
 frame.Position = UDim2.new(0.5, -220, 0.5, -265)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 2
@@ -93,35 +102,41 @@ titleLabel.Parent = frame
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0, 205, 0, 35)
 toggleBtn.Position = UDim2.new(0, 10, 0, 45)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
-toggleBtn.Text = "Master Auto Farm: OFF"
-toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleBtn.Font = Enum.Font.SourceSansBold
 toggleBtn.TextSize = 14
 toggleBtn.Parent = frame
 
-toggleBtn.MouseButton1Click:Connect(function()
-    FARMING_ACTIVE = not FARMING_ACTIVE
+local function updateMasterFarmVisual()
     toggleBtn.Text = FARMING_ACTIVE and "Master Auto Farm: ON" or "Master Auto Farm: OFF"
     toggleBtn.BackgroundColor3 = FARMING_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
-    saveConfig() -- Saves configuration state to local file storage
+    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+end
+updateMasterFarmVisual()
+
+toggleBtn.MouseButton1Click:Connect(function()
+    FARMING_ACTIVE = not FARMING_ACTIVE
+    updateMasterFarmVisual()
+    saveConfig() 
 end)
 
 -- Chest Farm Control Button
 local chestBtn = Instance.new("TextButton")
 chestBtn.Size = UDim2.new(0, 205, 0, 35)
 chestBtn.Position = UDim2.new(0, 225, 0, 45)
-chestBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
-chestBtn.Text = "🎁 Auto Chests: OFF"
-chestBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 chestBtn.Font = Enum.Font.SourceSansBold
 chestBtn.TextSize = 14
 chestBtn.Parent = frame
 
-chestBtn.MouseButton1Click:Connect(function()
-    CHEST_ACTIVE = not CHEST_ACTIVE
+local function updateChestVisual()
     chestBtn.Text = CHEST_ACTIVE and "🎁 Auto Chests: ON" or "🎁 Auto Chests: OFF"
     chestBtn.BackgroundColor3 = CHEST_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    chestBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+end
+updateChestVisual()
+
+chestBtn.MouseButton1Click:Connect(function()
+    CHEST_ACTIVE = not CHEST_ACTIVE
+    updateChestVisual()
     saveConfig()
 end)
 
@@ -129,7 +144,7 @@ end)
 local function createCategoryScroll(titleText, xOffset, targetSubTable)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(0, 205, 0, 220)
-    container.Position = UDim2.new(0, xOffset, 0, 95) -- Moved down 5 pixels to match spacing
+    container.Position = UDim2.new(0, xOffset, 0, 95) 
     container.BackgroundTransparency = 1
     container.Parent = frame
 
@@ -162,34 +177,41 @@ local function createCategoryScroll(titleText, xOffset, targetSubTable)
     for _, mobName in ipairs(sortedNames) do
         local mobBtn = Instance.new("TextButton")
         mobBtn.Size = UDim2.new(0, 190, 0, 30)
-        mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-        mobBtn.Text = mobName .. " [OFF]"
-        mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
         mobBtn.Font = Enum.Font.SourceSans
         mobBtn.TextSize = 13
         mobBtn.Parent = scroll
+
+        local function refreshMobButtonVisuals()
+            local state = targetSubTable[mobName]
+            if state == "ON" then
+                mobBtn.Text = mobName .. " [ON]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(56, 92, 145)
+                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            elseif state == "PRIORITY" then
+                mobBtn.Text = "⭐ " .. mobName .. " [PRIO]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(168, 126, 42)
+                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            else
+                mobBtn.Text = mobName .. " [OFF]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+                mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            end
+        end
+        refreshMobButtonVisuals() -- Run immediately on generation loop [INDEX]
 
         mobBtn.MouseButton1Click:Connect(function()
             local currentState = targetSubTable[mobName]
             
             if currentState == "OFF" then
                 targetSubTable[mobName] = "ON"
-                mobBtn.Text = mobName .. " [ON]"
-                mobBtn.BackgroundColor3 = Color3.fromRGB(56, 92, 145)
-                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             elseif currentState == "ON" then
                 targetSubTable[mobName] = "PRIORITY"
-                mobBtn.Text = "⭐ " .. mobName .. " [PRIO]"
-                mobBtn.BackgroundColor3 = Color3.fromRGB(168, 126, 42)
-                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
                 currentTarget = nil 
             else
                 targetSubTable[mobName] = "OFF"
-                mobBtn.Text = mobName .. " [OFF]"
-                mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-                mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
                 currentTarget = nil
             end
+            refreshMobButtonVisuals()
             saveConfig()
         end)
     end
@@ -199,14 +221,13 @@ end
 createCategoryScroll("⚔️ Mobs Category", 10, targets.Mobs)
 createCategoryScroll("👹 Bosses & Elites", 225, targets.Bosses)
 
--- Slider Construction Module
-local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
+-- Slider Construction Module (With Visual Save Syncing Fix)
+local function createSlider(axisName, minVal, maxVal, defaultStartVal, yOffset)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -20, 0, 20)
     label.Position = UDim2.new(0, 10, 0, yOffset)
     label.BackgroundTransparency = 1
     local suffix = (axisName:find("Orbit") and "°") or " studs"
-    label.Text = axisName .. ": " .. tostring(startVal) .. suffix
     label.TextColor3 = Color3.fromRGB(220, 220, 220)
     label.Font = Enum.Font.SourceSansBold
     label.TextSize = 13
@@ -222,12 +243,26 @@ local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
 
     local sliderBtn = Instance.new("TextButton")
     sliderBtn.Size = UDim2.new(0, 16, 0, 16)
-    local pct = (startVal - minVal) / (maxVal - minVal)
-    sliderBtn.Position = UDim2.new(pct, -8, 0.5, -8)
     sliderBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
     sliderBtn.Text = ""
     sliderBtn.BorderSizePixel = 0
     sliderBtn.Parent = sliderBg
+
+    local function refreshSliderVisuals()
+        local liveValue = defaultStartVal
+        if axisName == "🔄 Orbit Position" then
+            liveValue = currentOffset.X
+        elseif axisName == "📐 Height" then
+            liveValue = currentOffset.Y
+        elseif axisName == "📏 Distance" then
+            liveValue = currentOffset.Z
+        end
+
+        label.Text = axisName .. ": " .. tostring(liveValue) .. suffix
+        local pct = (liveValue - minVal) / (maxVal - minVal)
+        sliderBtn.Position = UDim2.new(pct, -8, 0.5, -8) -- Forces button handle to match save data [INDEX]
+    end
+    refreshSliderVisuals()
 
     local activeDragging = false
 
@@ -236,9 +271,7 @@ local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
         local barAbsSize = sliderBg.AbsoluteSize.X
         local clmp = math.clamp((inputPosition.X - barAbsPos) / barAbsSize, 0, 1)
         
-        sliderBtn.Position = UDim2.new(clmp, -8, 0.5, -8)
         local value = math.round(minVal + (clmp * (maxVal - minVal)))
-        label.Text = axisName .. ": " .. tostring(value) .. suffix
         
         if axisName == "🔄 Orbit Position" then
             currentOffset = Vector3.new(value, currentOffset.Y, currentOffset.Z)
@@ -247,6 +280,8 @@ local function createSlider(axisName, minVal, maxVal, startVal, yOffset)
         elseif axisName == "📏 Distance" then
             currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, value)
         end
+        
+        refreshSliderVisuals()
         saveConfig()
     end
 
@@ -291,9 +326,8 @@ UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
--- Helper function to search the entire Event branch dynamically for valid chests
 local function getActiveEventChestPrompt()
-    if not CHEST_ACTIVE then return nil end
+    if not CHECH_ACTIVE or not CHEST_ACTIVE then return nil end
 
     local eventsFolder = workspace:FindFirstChild("Entities")
     eventsFolder = eventsFolder and eventsFolder:FindFirstChild("Events")
@@ -302,6 +336,7 @@ local function getActiveEventChestPrompt()
     for _, item in ipairs(eventsFolder:GetDescendants()) do
         if item:IsA("Model") and item.Name == "Chest" and not processedChests[item] then
             
+            -- Credit Verification Layer
             local creditedFolder = item:FindFirstChild("Credited")
             if creditedFolder then
                 local isMyChest = false
@@ -421,12 +456,18 @@ RunService.RenderStepped:Connect(function()
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     local myHum = character and character:FindFirstChildOfClass("Humanoid")
     
-    if not myRoot or (myHum and myHum.Health <= 0) or not FARMING_ACTIVE then 
+    if not myRoot or (myHum and myHum.Health <= 0) then 
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
-        currentTarget = nil
         return 
     end
 
+    if not FARMING_ACTIVE then 
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+        currentTarget = nil 
+        return 
+    end
+
+    -- ABSOLUTE TOP PRIORITY: Intercept chest first and skip enemy code entirely
     local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
     if chestPrompt and chestModel and chestMiddlePart then
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
@@ -438,10 +479,12 @@ RunService.RenderStepped:Connect(function()
             flyAnchor.Parent = myRoot
         end
 
+        -- Teleport instantly to the chest and exit the RenderStepped frame execution
         myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 3, 0)
         return
     end
 
+    -- Standard Combat Targeting Loop (Only runs if NO chest is active)
     local currentEnemy = getActiveFarmTarget()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
@@ -473,9 +516,9 @@ end)
 -- Dedicated Async Thread for Chest Claim Processing & Interaction Spam
 task.spawn(function()
     while true do
-        task.wait(0.5)
+        task.wait(0.1) 
         if FARMING_ACTIVE and CHEST_ACTIVE then
-            local chestPrompt, chestModel = getActiveEventChestPrompt()
+            local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
             if chestPrompt and chestModel then
                 processedChests[chestModel] = true
                 
