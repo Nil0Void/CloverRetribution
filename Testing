@@ -670,33 +670,45 @@ end)
 -- Auto Weapon & Spell Maintenance Engine
 task.spawn(function()
     while true do
-        task.wait(1)
+        task.wait(0.5) -- Faster checks (twice per second) for highly responsive equipping
         pcall(function()
             local character = player.Character
             local myHum = character and character:FindFirstChildOfClass("Humanoid")
+            
+            -- Security Guard: Abort processing loop iteration if player is dead
             if not character or not myHum or myHum.Health <= 0 then return end
 
-            -- Auto Equip Weapon
+            -- 1. UNIVERSAL AUTO-EQUIP WEAPON HANDLER
             if WEAPON_ACTIVE then
-                local currentEnemy = getActiveFarmTarget()
-                if currentEnemy then
-                    if not currentEnemy:FindFirstChild("Weapon") then 
-                        ReplicatedStorage:FindFirstChild("Remote"):FireServer("EquipWeapon") 
-                    end
-                    if not currentEnemy:FindFirstChild("Grimoire") then 
-                        ReplicatedStorage:FindFirstChild("Remote"):FireServer("Book") 
-                    end
+                -- Check if Weapon tool object is physically missing from your character model
+                local hasWeapon = character:FindFirstChild("Weapon") ~= nil
+                
+                -- Check if Grimoire is missing (if it's still named 'BeltGrimoire', it's unequipped)
+                local hasGrimoire = character:FindFirstChild("Grimoire") ~= nil
+                local hasBeltGrimoire = character:FindFirstChild("BeltGrimoire") ~= nil
+                
+                -- If the weapon is missing, send the request to draw it
+                if not hasWeapon then 
+                    local remote = ReplicatedStorage:FindFirstChild("Remote")
+                    if remote then remote:FireServer("EquipWeapon") end
+                end
+                
+                -- If the book is unequipped on your belt, send the request to open it
+                if hasBeltGrimoire and not hasGrimoire then 
+                    local remote = ReplicatedStorage:FindFirstChild("Remote")
+                    if remote then remote:FireServer("Book") end
                 end
             end
 
-            -- Auto Equip & Cast Spell Loop
+            -- 2. AUTO-SPELL INVENTORY MOUNT HANDLER
             if SPELL_ACTIVE then
                 local backpack = player:FindFirstChild("Backpack")
                 if backpack then
                     for _, tool in ipairs(backpack:GetChildren()) do
+                        -- Pull spell tools from inventory instantly into the workspace character model
                         if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
                             tool.Parent = character
-                            task.wait(0.01)
+                            task.wait(0.01) -- Tiny safety delay for Roblox physics network replication
                         end
                     end
                 end
