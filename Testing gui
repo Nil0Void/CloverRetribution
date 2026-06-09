@@ -1,1 +1,593 @@
-d
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local FILE_NAME = "MasterOrbitalConfig.json"
+
+-- Global Targeting & Positioning State
+local FARMING_ACTIVE = false
+local CHEST_ACTIVE = false 
+local DRAGONBALL_ACTIVE = false -- NEW: Dragon Ball Feature Toggle State
+local currentOffset = Vector3.new(0, 5, 15)
+local currentTarget = nil
+local flyAnchor = nil
+
+local activeChestsCache = {}
+local chestVisitTimers = {}
+local chestVisitCounts = {}
+local currentChestIndex = nil
+
+-- Tracked Chest Memory
+local processedChests = {}
+
+-- Multi-State Target Tracking Table
+local targets = {
+    Mobs = {
+        ["Yeti"] = "OFF", ["Vampire Soldier"] = "OFF", ["Stone Guardian"] = "OFF",
+        ["Shadow Hand Goon"] = "OFF", ["Seasoned Mercenary"] = "OFF", ["Riddled Skeleton Soldier"] = "OFF",
+        ["Pumpkin"] = "OFF", ["Wolf"] = "OFF", ["Mage Apprentice"] = "OFF",
+        ["Lesser Devil Juggernaut"] = "OFF", ["Desert Claw"] = "OFF", ["Bandit"] = "OFF",
+        ["Wolf Hunter"] = "OFF", ["Wind Monk"] = "OFF", ["Lowly Goblin"] = "OFF",
+        ["Werewolf Soldier"] = "OFF"
+    },
+    Bosses = {
+        ["Vennum"] = "OFF", ["Alpha Wolf"] = "OFF", ["Warlord"] = "OFF",
+        ["Terra"] = "OFF", ["Red"] = "OFF", ["Alpha Desert Claw"] = "OFF",
+        ["Apex"] = "OFF", ["Kraken"] = "OFF", ["The Crimson Witch"] = "OFF",
+        ["Netherwing"] = "OFF", ["Khamsin"] = "OFF", ["Ice Golem"] = "OFF",
+        ["Nyxar"] = "OFF", ["Word Devil"] = "OFF", ["Devil"] = "OFF",
+        ["Medusa"] = "OFF", ["Aetherion"] = "OFF", ["Morningstar"] = "OFF",
+        ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF", ["Vampire Elite"] = "OFF"
+    }
+}
+
+local function saveConfig()
+    if not writefile then return end
+    pcall(function()
+        writefile(FILE_NAME, HttpService:JSONEncode({
+            FARMING_ACTIVE = FARMING_ACTIVE,
+            CHEST_ACTIVE = CHEST_ACTIVE,
+            DRAGONBALL_ACTIVE = DRAGONBALL_ACTIVE,
+            currentOffset = {currentOffset.X, currentOffset.Y, currentOffset.Z},
+            targets = targets
+        }))
+    end)
+end
+
+local function loadConfig()
+    pcall(function()
+        if readfile and isfile and isfile(FILE_NAME) then
+            local data = HttpService:JSONDecode(readfile(FILE_NAME))
+            if data then
+                FARMING_ACTIVE = data.FARMING_ACTIVE
+                CHEST_ACTIVE = data.CHEST_ACTIVE
+                if data.DRAGONBALL_ACTIVE ~= nil then DRAGONBALL_ACTIVE = data.DRAGONBALL_ACTIVE end
+                currentOffset = Vector3.new(data.currentOffset[1], data.currentOffset[2], data.currentOffset[3])
+                
+                if data.targets then
+                    if data.targets.Mobs then
+                        for k, v in pairs(data.targets.Mobs) do if targets.Mobs[k] then targets.Mobs[k] = tostring(v) end end
+                    end
+                    if data.targets.Bosses then
+                        for k, v in pairs(data.targets.Bosses) do if targets.Bosses[k] then targets.Bosses[k] = tostring(v) end end
+                    end
+                end
+            end
+        end
+    end)
+end
+loadConfig() 
+
+-- Core GUI Construction
+local gui = Instance.new("ScreenGui")
+gui.Name = "MasterOrbitalFarmingGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 440, 0, 565) -- Shifted height from 530 to 565 to perfectly cushion the new button
+frame.Position = UDim2.new(0.5, -220, 0.5, -282)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 2
+frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+frame.Active = true
+frame.Parent = gui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 35)
+titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+titleLabel.Text = "📐 Master Priority Orbital Attacher"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 16
+titleLabel.Parent = frame
+
+-- Main Farm Control Button
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 205, 0, 35)
+toggleBtn.Position = UDim2.new(0, 10, 0, 45)
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.TextSize = 14
+toggleBtn.Parent = frame
+
+local function updateMasterFarmVisual()
+    toggleBtn.Text = FARMING_ACTIVE and "Master Auto Farm: ON" or "Master Auto Farm: OFF"
+    toggleBtn.BackgroundColor3 = FARMING_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+end
+updateMasterFarmVisual()
+
+toggleBtn.MouseButton1Click:Connect(function()
+    FARMING_ACTIVE = not FARMING_ACTIVE
+    updateMasterFarmVisual()
+    saveConfig() 
+end)
+
+-- Chest Farm Control Button
+local chestBtn = Instance.new("TextButton")
+chestBtn.Size = UDim2.new(0, 205, 0, 35)
+chestBtn.Position = UDim2.new(0, 225, 0, 45)
+chestBtn.Font = Enum.Font.SourceSansBold
+chestBtn.TextSize = 14
+chestBtn.Parent = frame
+
+local function updateChestVisual()
+    chestBtn.Text = CHEST_ACTIVE and "🎁 Auto Chests: ON" or "🎁 Auto Chests: OFF"
+    chestBtn.BackgroundColor3 = CHEST_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    chestBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+end
+updateChestVisual()
+
+chestBtn.MouseButton1Click:Connect(function()
+    CHEST_ACTIVE = not CHECH_ACTIVE -- Keep consistency with local toggle names
+    CHEST_ACTIVE = not CHEST_ACTIVE
+    updateChestVisual()
+    saveConfig()
+end)
+
+-- Dragon Ball Toggle Control Button
+local dbBtn = Instance.new("TextButton")
+dbBtn.Size = UDim2.new(0, 420, 0, 35)
+dbBtn.Position = UDim2.new(0, 10, 0, 85)
+dbBtn.Font = Enum.Font.SourceSansBold
+dbBtn.TextSize = 14
+dbBtn.Parent = frame
+
+local function updateDbVisual()
+    dbBtn.Text = DRAGONBALL_ACTIVE and "🐉 Dragon Ball Priority TP: ON" or "🐉 Dragon Ball Priority TP: OFF"
+    dbBtn.BackgroundColor3 = DRAGONBALL_ACTIVE and Color3.fromRGB(168, 126, 42) or Color3.fromRGB(55, 55, 55)
+    dbBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+end
+updateDbVisual()
+
+dbBtn.MouseButton1Click:Connect(function()
+    DRAGONBALL_ACTIVE = not DRAGONBALL_ACTIVE
+    updateDbVisual()
+    saveConfig()
+end)
+
+-- Category Frame Generation Helper
+local function createCategoryScroll(titleText, xOffset, targetSubTable)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(0, 205, 0, 220)
+    container.Position = UDim2.new(0, xOffset, 0, 130) -- Shifted down from 95 to 130 to give space to the Dragon Ball Button
+    container.BackgroundTransparency = 1
+    container.Parent = frame
+
+    local catTitle = Instance.new("TextLabel")
+    catTitle.Size = UDim2.new(1, 0, 0, 20)
+    catTitle.BackgroundTransparency = 1
+    catTitle.Text = titleText
+    catTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+    catTitle.Font = Enum.Font.SourceSansBold
+    catTitle.TextSize = 14
+    catTitle.Parent = container
+
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, 0, 1, -25)
+    scroll.Position = UDim2.new(0, 0, 0, 25)
+    scroll.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.ScrollBarThickness = 5
+    scroll.Parent = container
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 4)
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.Parent = scroll
+
+    local sortedNames = {}
+    for name in pairs(targetSubTable) do table.insert(sortedNames, name) end
+    table.sort(sortedNames)
+
+    for _, mobName in ipairs(sortedNames) do
+        local mobBtn = Instance.new("TextButton")
+        mobBtn.Size = UDim2.new(0, 190, 0, 30)
+        mobBtn.Font = Enum.Font.SourceSans
+        mobBtn.TextSize = 13
+        mobBtn.Parent = scroll
+
+        local function refreshMobButtonVisuals()
+            local state = targetSubTable[mobName]
+            if state == "ON" then
+                mobBtn.Text = mobName .. " [ON]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(56, 92, 145)
+                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            elseif state == "PRIORITY" then
+                mobBtn.Text = "⭐ " .. mobName .. " [PRIO]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(168, 126, 42)
+                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            else
+                mobBtn.Text = mobName .. " [OFF]"
+                mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+                mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            end
+        end
+        refreshMobButtonVisuals()
+
+        mobBtn.MouseButton1Click:Connect(function()
+            local currentState = targetSubTable[mobName]
+            
+            if currentState == "OFF" then
+                targetSubTable[mobName] = "ON"
+            elseif currentState == "ON" then
+                targetSubTable[mobName] = "PRIORITY"
+                currentTarget = nil 
+            else
+                targetSubTable[mobName] = "OFF"
+                currentTarget = nil
+            end
+            refreshMobButtonVisuals()
+            saveConfig()
+        end)
+    end
+    scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+end
+
+createCategoryScroll("⚔️ Mobs Category", 10, targets.Mobs)
+createCategoryScroll("👹 Bosses & Elites", 225, targets.Bosses)
+
+-- Slider Construction Module (With Visual Save Syncing Fix)
+local function createSlider(axisName, minVal, maxVal, defaultStartVal, yOffset)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -20, 0, 20)
+    label.Position = UDim2.new(0, 10, 0, yOffset)
+    label.BackgroundTransparency = 1
+    local suffix = (axisName:find("Orbit") and "°") or " studs"
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -20, 0, 8)
+    sliderBg.Position = UDim2.new(0, 10, 0, yOffset + 20)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = frame
+
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Size = UDim2.new(0, 16, 0, 16)
+    sliderBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+    sliderBtn.Text = ""
+    sliderBtn.BorderSizePixel = 0
+    sliderBtn.Parent = sliderBg
+
+    local function refreshSliderVisuals()
+        local liveValue = defaultStartVal
+        if axisName == "🔄 Orbit Position" then liveValue = currentOffset.X
+        elseif axisName == "📐 Height" then liveValue = currentOffset.Y
+        elseif axisName == "📏 Distance" then liveValue = currentOffset.Z end
+
+        label.Text = axisName .. ": " .. tostring(liveValue) .. suffix
+        local pct = (liveValue - minVal) / (maxVal - minVal)
+        sliderBtn.Position = UDim2.new(pct, -8, 0.5, -8)
+    end
+    refreshSliderVisuals()
+
+    local activeDragging = false
+    local function updateSliderPosition(inputPosition)
+        local barAbsPos = sliderBg.AbsolutePosition.X
+        local barAbsSize = sliderBg.AbsoluteSize.X
+        local clmp = math.clamp((inputPosition.X - barAbsPos) / barAbsSize, 0, 1)
+        local value = math.round(minVal + (clmp * (maxVal - minVal)))
+        
+        if axisName == "🔄 Orbit Position" then currentOffset = Vector3.new(value, currentOffset.Y, currentOffset.Z)
+        elseif axisName == "📐 Height" then currentOffset = Vector3.new(currentOffset.X, value, currentOffset.Z)
+        elseif axisName == "📏 Distance" then currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, value) end
+        
+        refreshSliderVisuals()
+        saveConfig()
+    end
+
+    sliderBtn.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then activeDragging = true end end)
+    UIS.InputChanged:Connect(function(input) if activeDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then updateSliderPosition(input.Position) end end)
+    UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then activeDragging = false end end)
+end
+
+-- Shifted slider yOffsets down +35 studs to align flawlessly around category heights
+createSlider("🔄 Orbit Position", -180, 180, 0, 395)
+createSlider("📐 Height", -20, 30, 5, 445)
+createSlider("📏 Distance", 0, 50, 15, 495)
+
+-- UI Mobile & Desktop Dragging Framework
+local dragging, dragStart, startPos = false, nil, nil
+frame.InputBegan:Connect(function(input) if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then dragging, dragStart, startPos = true, input.Position, frame.Position end end)
+UIS.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then local delta = input.Position - dragStart frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
+UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
+
+-- Real-time folder hook listens for chest spawns instantly
+local function monitorWorkspaceEvents()
+    local eventsFolder = workspace:FindFirstChild("Entities")
+    eventsFolder = eventsFolder and eventsFolder:FindFirstChild("Events")
+    if not eventsFolder then return end
+    eventsFolder.DescendantAdded:Connect(function(descendant) if descendant:IsA("Model") and descendant.Name == "Chest" then table.insert(activeChestsCache, descendant) end end)
+    for _, descendant in ipairs(eventsFolder:GetDescendants()) do if descendant:IsA("Model") and descendant.Name == "Chest" then table.insert(activeChestsCache, descendant) end end
+end
+task.spawn(monitorWorkspaceEvents)
+
+-- Helper function to fetch the next valid chest in our cycling queue
+local function getActiveEventChestPrompt()
+    if not CHEST_ACTIVE then return nil end
+
+    local validChests = {}
+    
+    for i = #activeChestsCache, 1, -1 do
+        local item = activeChestsCache[i]
+        
+        if not item or not item.Parent then
+            chestVisitTimers[item] = nil 
+            chestVisitCounts[item] = nil 
+            table.remove(activeChestsCache, i)
+            continue
+        end
+
+        if chestVisitCounts[item] and chestVisitCounts[item] >= 2 then
+            continue
+        end
+
+        local creditedFolder = item:FindFirstChild("Credited")
+        if creditedFolder then
+            local isMyChest = false
+            for _, credit in ipairs(creditedFolder:GetChildren()) do
+                if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then isMyChest = true break end
+            end
+            if not isMyChest then continue end
+        end
+
+        local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
+        local targetPart = prompt and (prompt.Parent:IsA("BasePart") and prompt.Parent or item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true))
+        
+        if prompt and targetPart then
+            table.insert(validChests, {prompt = prompt, model = item, part = targetPart})
+        end
+    end
+
+    if #validChests == 0 then
+        currentChestIndex = nil
+        return nil
+    end
+
+    if currentChestIndex and currentChestIndex <= #validChests then
+        local activeSelection = validChests[currentChestIndex]
+        local startTime = chestVisitTimers[activeSelection.model]
+        
+        if startTime and (os.clock() - startTime) < 3 then
+            return activeSelection.prompt, activeSelection.model, activeSelection.part
+        elseif startTime then
+            chestVisitCounts[activeSelection.model] = (chestVisitCounts[activeSelection.model] or 0) + 1
+            chestVisitTimers[activeSelection.model] = nil 
+        end
+    end
+
+    local nextIndex = 1
+    if currentChestIndex then
+        nextIndex = (currentChestIndex % #validChests) + 1
+    end
+
+    local loopsChecked = 0
+    while loopsChecked < #validChests do
+        local checkSelection = validChests[nextIndex]
+        if not chestVisitCounts[checkSelection.model] or chestVisitCounts[checkSelection.model] < 2 then
+            break 
+        end
+        nextIndex = (nextIndex % #validChests) + 1
+        loopsChecked = loopsChecked + 1
+    end
+
+    local finalSelection = validChests[nextIndex]
+    
+    if chestVisitCounts[finalSelection.model] and chestVisitCounts[finalSelection.model] >= 2 then
+        currentChestIndex = nil
+        return nil
+    end
+
+    currentChestIndex = nextIndex
+    chestVisitTimers[finalSelection.model] = os.clock() 
+
+    return finalSelection.prompt, finalSelection.model, finalSelection.part
+end
+
+-- NEW: Helper function to target Dragon Balls inside workspace.Ignore
+local function getActiveDragonBall()
+    if not DRAGONBALL_ACTIVE then return nil end
+    local ignoreFolder = workspace:FindFirstChild("Ignore")
+    if not ignoreFolder then return nil end
+    
+    for _, obj in ipairs(ignoreFolder:GetChildren()) do
+        if string.match(obj.Name, "^Dragon Ball %d+$") then
+            local part = obj:IsA("BasePart") and obj or obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart", true)
+            local prompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("ProximityPrompt", true)
+            if part and prompt then
+                return obj, part, prompt
+            end
+        end
+    end
+    return nil
+end
+
+-- Target Detection Helper (Partial Match + Tri-State Priority Layer Filtering)
+local function getActiveFarmTarget()
+    local enemiesFolder = workspace:FindFirstChild("Entities")
+    enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
+    if not enemiesFolder then currentTarget = nil return nil end
+    local enemiesList = enemiesFolder:GetChildren()
+
+    -- LAYER 1: Starred PRIORITY targets
+    for _, mob in ipairs(enemiesList) do
+        local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+        local mobHum = mob:FindFirstChildOfClass("Humanoid")
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            local lowerMobName = string.lower(mob.Name)
+            for name, state in pairs(targets.Bosses) do if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then currentTarget = mob return currentTarget end end
+            for name, state in pairs(targets.Mobs) do if state == "PRIORITY" and string.find(lowerMobName, string.lower(name), 1, true) then currentTarget = mob return currentTarget end end
+        end
+    end
+
+    -- LAYER 2: Regular Bosses
+    for _, mob in ipairs(enemiesList) do
+        local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+        local mobHum = mob:FindFirstChildOfClass("Humanoid")
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            local lowerMobName = string.lower(mob.Name)
+            for name, state in pairs(targets.Bosses) do if state == "ON" and string.find(lowerMobName, string.lower(name), 1, true) then currentTarget = mob return currentTarget end end
+        end
+    end
+
+    -- LAYER 3: Sticky Check
+    if currentTarget and currentTarget.Parent == enemiesFolder then
+        local mobRoot = currentTarget:FindFirstChild("HumanoidRootPart")
+        local mobHum = currentTarget:FindFirstChildOfClass("Humanoid")
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            local currentLower = string.lower(currentTarget.Name)
+            local isStillEnabled = false
+            for name, state in pairs(targets.Mobs) do if state == "ON" and string.find(currentLower, string.lower(name), 1, true) then isStillEnabled = true break end end
+            if isStillEnabled then return currentTarget end
+        end
+    end
+
+    -- LAYER 4: Standard Mobs
+    currentTarget = nil
+    for _, mob in ipairs(enemiesList) do
+        local mobRoot = mob:FindFirstChild("HumanoidRootPart")
+        local mobHum = mob:FindFirstChildOfClass("Humanoid")
+        if mobRoot and mobHum and mobHum.Health > 0 then
+            local lowerMobName = string.lower(mob.Name)
+            for name, state in pairs(targets.Mobs) do if state == "ON" and string.find(lowerMobName, string.lower(name), 1, true) then currentTarget = mob return currentTarget end end
+        end
+    end
+    return nil
+end
+
+-- Fly & Vertical Orbit Loop
+RunService.RenderStepped:Connect(function()
+    local character = player.Character
+    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+    local myHum = character and character:FindFirstChildOfClass("Humanoid")
+    
+    if not myRoot or (myHum and myHum.Health <= 0) then if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end return end
+
+    -------------------------------------------------------------------------------------
+    -- CRITICAL OVERRIDE: Absolute Dragon Ball Check. Stops all farming physics instantly
+    -------------------------------------------------------------------------------------
+    local dbModel, dbPart, dbPrompt = getActiveDragonBall()
+    if dbModel and dbPart and dbPrompt then
+        return -- Yield physics frame completely over to the background hyper-speed engine
+    end
+    -------------------------------------------------------------------------------------
+
+    if not FARMING_ACTIVE then if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end currentTarget = nil return end
+
+    -- CHEST QUEUE OVERRIDE LATCH
+    local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
+    if chestPrompt and chestModel and chestMiddlePart then
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.Name = "AntiDriftAnchor"
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+        myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 2, 0)
+        return
+    end
+
+    -- Standard Combat Targeting Loop
+    local currentEnemy = getActiveFarmTarget()
+    if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
+        local enemyRoot = currentEnemy.HumanoidRootPart
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.Name = "AntiDriftAnchor"
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+        local angleRad = math.rad(currentOffset.X) 
+        local radiusDistance = currentOffset.Z
+        local staticHeightAdjust = currentOffset.Y
+        local orbitY = math.sin(angleRad) * radiusDistance + staticHeightAdjust
+        local orbitZ = math.cos(angleRad) * radiusDistance
+        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(0, orbitY, orbitZ)).Position
+        myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
+    else
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+    end
+end)
+
+-- Uncapped Frame-Rate Synced Interaction Engine
+task.spawn(function()
+    while true do
+        RunService.Heartbeat:Wait()
+        
+        -- LAYER 1 INTERACTION OVERRIDE: Rapidly latch to Dragon Ball if present
+        if DRAGONBALL_ACTIVE then
+            local dbModel, dbPart, dbPrompt = getActiveDragonBall()
+            if dbModel and dbPart and dbPrompt then
+                local character = player.Character
+                local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    -- Keep body velocity anchor alive during override
+                    if not flyAnchor or flyAnchor.Parent ~= myRoot then
+                        if flyAnchor then flyAnchor:Destroy() end
+                        flyAnchor = Instance.new("BodyVelocity")
+                        flyAnchor.Name = "AntiDriftAnchor"
+                        flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                        flyAnchor.Velocity = Vector3.new(0, 0, 0)
+                        flyAnchor.Parent = myRoot
+                    end
+                    -- Stay continuously locked perfectly in interaction bounds (3 studs offset removed as requested)
+                    myRoot.CFrame = dbPart.CFrame
+                    pcall(function() fireproximityprompt(dbPrompt) end)
+                end
+                continue -- Force-skip regular chest checking to maximize frame rate throughput
+            end
+        end
+
+        -- LAYER 2 INTERACTION: Standard Chest Prompt Interaction
+        if FARMING_ACTIVE and CHEST_ACTIVE then
+            local chestPrompt, chestModel = getActiveEventChestPrompt()
+            if chestPrompt and chestModel then
+                pcall(function() fireproximityprompt(chestPrompt) end)
+            end
+        end
+    end
+end)
+
+-- Anti-AFK Engine Module
+local VirtualUser = game:GetService("VirtualUser")
+player.Idled:Connect(function()
+    pcall(function()
+        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    end)
+end)
+
+print("Master Priority Orbital Attacher with Overriding Dragon Ball Engine Configured!")
