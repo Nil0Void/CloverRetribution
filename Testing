@@ -289,50 +289,145 @@ frame.InputBegan:Connect(function(input) if (input.UserInputType == Enum.UserInp
 UIS.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then local delta = input.Position - dragStart frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
 UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
 
+-- ============================================================================
+-- OPTIMIZED, MEMORY-SAFE TARGET DETECTION MECHANICS
+-- ============================================================================
+
+-- Tracked Chest Memory & Active Object Collections
+local activeChestsCache = {}
+local chestVisitTimers = {}
+local chestVisitCounts = {}
+local currentChestIndex = nil
+
+-- Real-time folder hook listens for chest spawns instantly (Cleaned Memory Leak)
 local function monitorWorkspaceEvents()
-    local folder = workspace:FindFirstChild("Entities")
-    folder = folder and folder:FindFirstChild("Events")
-    if not folder then return end
-    folder.DescendantAdded:Connect(function(d) if d:IsA("Model") and d.Name == "Chest" then table.insert(activeChestsCache, d) end end)
-    for _, d in ipairs(folder:GetDescendants()) do if d:IsA("Model") and d.Name == "Chest" then table.insert(activeChestsCache, d) end end
+    local entities = workspace:FindFirstChild("Entities")
+    local eventsFolder = entities and entities:FindFirstChild("Events")
+    if not eventsFolder then return end
+    
+    -- Periodic Garbage Collection of memory cache arrays to prevent RAM inflation
+    task.spawn(function()
+        while true do
+            task.wait(30) -- Run a deep clean cycle every 30 seconds
+            for i = #activeChestsCache, 1, -1 do
+                local item = activeChestsCache[i]
+                if not item or not item.Parent then
+                    chestVisitTimers[item] = nil 
+                    chestVisitCounts[item] = nil
+                    table.remove(activeChestsCache, i)
+                end
+            end
+        end
+    end)
+
+    eventsFolder.DescendantAdded:Connect(function(descendant) 
+        if descendant:IsA("Model") and descendant.Name == "Chest" then 
+            -- Avoid duplicate references
+            if not table.find(activeChestsCache, descendant) then
+                table.insert(activeChestsCache, descendant) 
+            end
+        end 
+    end)
+    
+    for _, descendant in ipairs(eventsFolder:GetDescendants()) do 
+        if descendant:IsA("Model") and descendant.Name == "Chest" then 
+            table.insert(activeChestsCache, descendant) 
+        end 
+    end
 end
 task.spawn(monitorWorkspaceEvents)
 
+-- Helper function to fetch the next valid chest in our cycling queue
 local function getActiveEventChestPrompt()
     if not CHEST_ACTIVE then return nil end
-    local valid = {}
+
+    local validChests = {}
+    
+    -- Parse active live cache cleanly
     for i = #activeChestsCache, 1, -1 do
         local item = activeChestsCache[i]
-        if not item or not item.Parent then chestVisitTimers[item] = nil chestVisitCounts[item] = nil table.remove(activeChestsCache, i) continue end
-        if chestVisitCounts[item] and chestVisitCounts[item] >= 2 then continue end
         
-        local credited = item:FindFirstChild("Credited")
-        if credited then
-            local mine = false
-            for _, c in ipairs(credited:GetChildren()) do if string.find(string.lower(c.Name), string.lower(player.Name), 1, true) then mine = true break end end
-            if not mine then continue end
+        -- Instantly purge invalid game items from memory
+        if not item or not item.Parent then
+            chestVisitTimers[item] = nil 
+            chestVisitCounts[item] = nil
+            table.remove(activeChestsCache, i)
+            continue
         end
+
+        -- HARD CAP OVERRIDE: Skip if 2 rounds are completed
+        if chestVisitCounts[item] and chestVisitCounts[item] >= 2 then
+            continue
+        end
+
+        -- Credit Tracker Verification Layer
+        local creditedFolder = item:FindFirstChild("Credited")
+        if creditedFolder then
+            local isMyChest = false
+            for _, credit in ipairs(creditedFolder:GetChildren()) do
+                if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then 
+                    isMyChest = true 
+                    break 
+                end
+            end
+            if not isMyChest then continue end
+        end
+
         local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
-        local part = prompt and (prompt.Parent:IsA("BasePart") and prompt.Parent or item:FindFirstChild("middle") or item.PrimaryPart)
-        if prompt and part then table.insert(valid, {prompt = prompt, model = item, part = part}) end
+        local targetPart = prompt and (prompt.Parent:IsA("BasePart") and prompt.Parent or item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true))
+        
+        if prompt and targetPart then
+            table.insert(validChests, {prompt = prompt, model = item, part = targetPart})
+        end
     end
-    if #valid == 0 then currentChestIndex = nil return nil end
-    if currentChestIndex and currentChestIndex <= #valid then
-        local active = valid[currentChestIndex]
-        local start = chestVisitTimers[active.model]
-        if start and (os.clock() - start) < 3 then return active.prompt, active.model, active.part
-        elseif start then chestVisitCounts[active.model] = (chestVisitCounts[active.model] or 0) + 1 chestVisitTimers[active.model] = nil end
+
+    if #validChests == 0 then
+        currentChestIndex = nil
+        return nil
     end
-    local nextIndex = currentChestIndex and ((currentChestIndex % #valid) + 1) or 1
-    for _ = 1, #valid do
-        if not chestVisitCounts[valid[nextIndex].model] or chestVisitCounts[valid[nextIndex].model] < 2 then break end
-        nextIndex = (nextIndex % #valid) + 1
+
+    -- Verify if our active selection is still within its 3-second loop window
+    if currentChestIndex and currentChestIndex <= #validChests then
+        local activeSelection = validChests[currentChestIndex]
+        local startTime = chestVisitTimers[activeSelection.model]
+        
+        if startTime and (os.clock() - startTime) < 3 then
+            return activeSelection.prompt, activeSelection.model, activeSelection.part
+        elseif startTime then
+            chestVisitCounts[activeSelection.model] = (chestVisitCounts[activeSelection.model] or 0) + 1
+            chestVisitTimers[activeSelection.model] = nil 
+        end
     end
-    if chestVisitCounts[valid[nextIndex].model] and chestVisitCounts[valid[nextIndex].model] >= 2 then currentChestIndex = nil return nil end
+
+    -- Cycle to the next available chest index carousel point
+    local nextIndex = 1
+    if currentChestIndex then
+        nextIndex = (currentChestIndex % #validChests) + 1
+    end
+
+    local loopsChecked = 0
+    while loopsChecked < #validChests do
+        local checkSelection = validChests[nextIndex]
+        if not chestVisitCounts[checkSelection.model] or chestVisitCounts[checkSelection.model] < 2 then
+            break 
+        end
+        nextIndex = (nextIndex % #validChests) + 1
+        loopsChecked = loopsChecked + 1
+    end
+
+    local finalSelection = validChests[nextIndex]
+    
+    if chestVisitCounts[finalSelection.model] and chestVisitCounts[finalSelection.model] >= 2 then
+        currentChestIndex = nil
+        return nil
+    end
+
     currentChestIndex = nextIndex
-    chestVisitTimers[valid[nextIndex].model] = os.clock()
-    return valid[nextIndex].prompt, valid[nextIndex].model, valid[nextIndex].part
+    chestVisitTimers[finalSelection.model] = os.clock() 
+
+    return finalSelection.prompt, finalSelection.model, finalSelection.part
 end
+
 
 local function getActiveDragonBall()
     if not DRAGONBALL_ACTIVE then return nil end
