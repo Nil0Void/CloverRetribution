@@ -18,7 +18,7 @@ local LOOP_DELAY = 50
 
 -- Auto Walk Config
 local MOVE_DURATION = 5
-local RESET_TIME = 15
+local RESET_TIME = 5
 
 -- UI Configuration (Unified Menu)
 local gui = Instance.new("ScreenGui")
