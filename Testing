@@ -667,36 +667,58 @@ task.spawn(function()
     end
 end)
 
--- Auto Weapon & Spell Maintenance Engine
+-- Helper function to find your true character model inside workspace.Entities
+local function getTrueCharacter()
+    local entitiesFolder = workspace:FindFirstChild("Entities")
+    if not entitiesFolder then return player.Character end -- Fallback to standard
+    
+    -- Scan the entities folder for a model matching your local player's identity
+    for _, child in ipairs(entitiesFolder:GetChildren()) do
+        if child:IsA("Model") and child:FindFirstChildOfClass("Humanoid") then
+            -- Match by checking if a script helper exists or simply by checking network ownership via name links
+            if child.Name == player.Name or string.find(child.Name, "^AiPlayer_") then
+                -- Double check to ensure it's you by matching standard character properties if needed
+                -- In most games shifting characters into Entities, your standard player.Character name matches this child name
+                if player.Character and child.Name == player.Character.Name then
+                    return child
+                end
+            end
+        end
+    end
+    
+    -- Ultimate fallback if the loop above fails to find a custom folder model
+    return player.Character
+end
+
 task.spawn(function()
     while true do
-        task.wait(0.5) -- Faster checks (twice per second) for highly responsive equipping
+        task.wait(0.5) -- Scan twice per second
         pcall(function()
-            local character = player.Character
-            local myHum = character and character:FindFirstChildOfClass("Humanoid")
+            -- Locate your character model inside workspace.Entities dynamically
+            local trueCharacter = getTrueCharacter()
+            local myHum = trueCharacter and trueCharacter:FindFirstChildOfClass("Humanoid")
             
-            -- Security Guard: Abort processing loop iteration if player is dead
-            if not character or not myHum or myHum.Health <= 0 then return end
+            -- Security Guard: Abort processing if your entity is dead or missing
+            if not trueCharacter or not myHum or myHum.Health <= 0 then return end
 
             -- 1. UNIVERSAL AUTO-EQUIP WEAPON HANDLER
             if WEAPON_ACTIVE then
-                -- Check if Weapon tool object is physically missing from your character model
-                local hasWeapon = character:FindFirstChild("Weapon") ~= nil
+                -- Check the correct custom folder path for your weapon and books
+                local hasWeapon = trueCharacter:FindFirstChild("Weapon") ~= nil
+                local hasGrimoire = trueCharacter:FindFirstChild("Grimoire") ~= nil
+                local hasBeltGrimoire = trueCharacter:FindFirstChild("BeltGrimoire") ~= nil
                 
-                -- Check if Grimoire is missing (if it's still named 'BeltGrimoire', it's unequipped)
-                local hasGrimoire = character:FindFirstChild("Grimoire") ~= nil
-                local hasBeltGrimoire = character:FindFirstChild("BeltGrimoire") ~= nil
-                
-                -- If the weapon is missing, send the request to draw it
-                if not hasWeapon then 
-                    local remote = ReplicatedStorage:FindFirstChild("Remote")
-                    if remote then remote:FireServer("EquipWeapon") end
-                end
-                
-                -- If the book is unequipped on your belt, send the request to open it
-                if hasBeltGrimoire and not hasGrimoire then 
-                    local remote = ReplicatedStorage:FindFirstChild("Remote")
-                    if remote then remote:FireServer("Book") end
+                local remote = ReplicatedStorage:FindFirstChild("Remote")
+                if remote then
+                    -- If weapon is missing completely from your entity frame, fire draw remote
+                    if not hasWeapon then 
+                        remote:FireServer("EquipWeapon") 
+                    end
+                    
+                    -- If the book is still stored on your belt, fire open remote
+                    if hasBeltGrimoire and not hasGrimoire then 
+                        remote:FireServer("Book") 
+                    end
                 end
             end
 
@@ -705,10 +727,10 @@ task.spawn(function()
                 local backpack = player:FindFirstChild("Backpack")
                 if backpack then
                     for _, tool in ipairs(backpack:GetChildren()) do
-                        -- Pull spell tools from inventory instantly into the workspace character model
                         if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
-                            tool.Parent = character
-                            task.wait(0.01) -- Tiny safety delay for Roblox physics network replication
+                            -- Parent tools straight to your true character folder space
+                            tool.Parent = trueCharacter
+                            task.wait(0.01)
                         end
                     end
                 end
