@@ -27,11 +27,13 @@ local flyAnchor = nil
 
 -- Cache Queue Framework Memory Assemblies
 local activeChestsCache = {}
-local activeDragonBallsCache = {}
 local chestVisitTimers = {}
 local chestVisitCounts = {}
 local currentChestIndex = nil
 local processedChests = {}
+
+-- Dynamic asset cache tables
+local activeDragonBallsCache = {}
 
 -- Comprehensive Target Dictionary Mapping Parameters
 local targets = {
@@ -54,45 +56,33 @@ local targets = {
     }
 }
 
--- Hand-Mapped Precise Spawn Directory
-local spawnMap = {
-    ["Vennum"] = "VennumSpawn", ["Alpha Wolf"] = "AlphaWolfSpawn", ["Warlord"] = "AlphaWolfSpawn",
-    ["Terra"] = "StoneGuardian1", ["Red"] = "VampireSoldierSpawn", ["Alpha Desert Claw"] = "DesertClaw1",
-    ["Apex"] = "AlphaWolfSpawn", ["Kraken"] = "Desert Kraken", ["The Crimson Witch"] = "WindMageSpawn",
-    ["Netherwing"] = "LesserDevilSpawn", ["Khamsin"] = "DesertClaw1", ["Ice Golem"] = "YettiSpawn1",
-    ["Nyxar"] = "DarkSkeleton", ["Word Devil"] = "LesserDevilSpawn", ["Devil"] = "LesserDevilSpawn",
-    ["Medusa"] = "OgreSpawn", ["Aetherion"] = "LesserDevilSpawn", ["Morningstar"] = "LesserDevilSpawn",
-    ["Primal Werewolf"] = "WerewolfSoldierSpawn", ["Elder Vampire"] = "VampireSoldierSpawn",
-    ["Yeti"] = "YettiSpawn1", ["Vampire Soldier"] = "VampireSoldierSpawn", ["Stone Guardian"] = "StoneGuardian1",
-    ["Shadow Hand Goon"] = "ShadowHandSpawn1", ["Seasoned Mercenary"] = "SeasonedMercenarySpawn",
-    ["Riddled Skeleton Soldier"] = "DarkSkeleton", ["Pumpkin"] = "Pumpkins", ["Wolf"] = "WoldSpawn",
-    ["Mage Apprentice"] = "FireMageSpawn", ["Lesser Devil Juggernaut"] = "LesserDevilSpawn",
-    ["Desert Claw"] = "DesertClaw1", ["Bandit"] = "Bandit2Spawn", ["Wolf Hunter"] = "WoldSpawn",
-    ["Wind Monk"] = "WindMageSpawn", ["Lowly Goblin"] = "LowlyGoblinn", ["Werewolf Soldier"] = "WerewolfSoldierSpawn"
-}
+-- Automated Asset Removal Implementation Layer
+local function cleanseAtmosphere()
+    pcall(function()
+        local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Lighting:FindFirstChild("Atmosphere", true)
+        if atmosphere then
+            atmosphere:Destroy()
+        end
+    end)
+end
+cleanseAtmosphere()
+Lighting.ChildAdded:Connect(cleanseAtmosphere)
 
 -- Data Profile Storage Logic
-local function loadConfig()
+local function saveConfig()
+    if not writefile then return end
     pcall(function()
-        if readfile and isfile and isfile(FILE_NAME) then
-            local data = HttpService:JSONDecode(readfile(FILE_NAME))
-            if data then
-                FARMING_ACTIVE = data.FARMING_ACTIVE or false
-                CHEST_ACTIVE = data.CHEST_ACTIVE or false
-                EQUIP_ACTIVE = data.EQUIP_ACTIVE or false
-                SPELL_ACTIVE = data.SPELL_ACTIVE or false
-                DRAGON_BALL_ACTIVE = data.DRAGON_BALL_ACTIVE or false
-                
-                -- FIXED: Safe variable type check prevents startup nil crashes
-                if data.currentOffset and type(data.currentOffset) == "table" and #data.currentOffset >= 3 then
-                    currentOffset = Vector3.new(
-                        tonumber(data.currentOffset[1]) or 0, 
-                        tonumber(data.currentOffset[2]) or 5, 
-                        tonumber(data.currentOffset[3]) or 15
-                    )
-                else
-                    currentOffset = Vector3.new(0, 5, 15)
-                end
+        writefile(FILE_NAME, HttpService:JSONEncode({
+            FARMING_ACTIVE = FARMING_ACTIVE,
+            CHEST_ACTIVE = CHEST_ACTIVE,
+            EQUIP_ACTIVE = EQUIP_ACTIVE,
+            SPELL_ACTIVE = SPELL_ACTIVE,
+            DRAGON_BALL_ACTIVE = DRAGON_BALL_ACTIVE,
+            currentOffset = {currentOffset.X, currentOffset.Y, currentOffset.Z},
+            targets = targets
+        }))
+    end)
+end
 
 local function loadConfig()
     pcall(function()
