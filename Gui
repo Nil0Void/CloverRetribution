@@ -27,6 +27,7 @@ local flyAnchor = nil
 
 -- Cache Queue Framework Memory Assemblies
 local activeChestsCache = {}
+local activeDragonBallsCache = {}
 local chestVisitTimers = {}
 local chestVisitCounts = {}
 local currentChestIndex = nil
@@ -53,18 +54,22 @@ local targets = {
     }
 }
 
--- Automated Asset Removal Implementation Layer
-local function cleanseAtmosphere()
-    pcall(function()
-        local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Lighting:FindFirstChild("Atmosphere", true)
-        if atmosphere then
-            atmosphere:Destroy()
-            print("Atmosphere component successfully purged from Lighting channel.")
-        end
-    end)
-end
-cleanseAtmosphere()
-Lighting.ChildAdded:Connect(cleanseAtmosphere)
+-- Hand-Mapped Precise Spawn Directory
+local spawnMap = {
+    ["Vennum"] = "VennumSpawn", ["Alpha Wolf"] = "AlphaWolfSpawn", ["Warlord"] = "AlphaWolfSpawn",
+    ["Terra"] = "StoneGuardian1", ["Red"] = "VampireSoldierSpawn", ["Alpha Desert Claw"] = "DesertClaw1",
+    ["Apex"] = "AlphaWolfSpawn", ["Kraken"] = "Desert Kraken", ["The Crimson Witch"] = "WindMageSpawn",
+    ["Netherwing"] = "LesserDevilSpawn", ["Khamsin"] = "DesertClaw1", ["Ice Golem"] = "YettiSpawn1",
+    ["Nyxar"] = "DarkSkeleton", ["Word Devil"] = "LesserDevilSpawn", ["Devil"] = "LesserDevilSpawn",
+    ["Medusa"] = "OgreSpawn", ["Aetherion"] = "LesserDevilSpawn", ["Morningstar"] = "LesserDevilSpawn",
+    ["Primal Werewolf"] = "WerewolfSoldierSpawn", ["Elder Vampire"] = "VampireSoldierSpawn",
+    ["Yeti"] = "YettiSpawn1", ["Vampire Soldier"] = "VampireSoldierSpawn", ["Stone Guardian"] = "StoneGuardian1",
+    ["Shadow Hand Goon"] = "ShadowHandSpawn1", ["Seasoned Mercenary"] = "SeasonedMercenarySpawn",
+    ["Riddled Skeleton Soldier"] = "DarkSkeleton", ["Pumpkin"] = "Pumpkins", ["Wolf"] = "WoldSpawn",
+    ["Mage Apprentice"] = "FireMageSpawn", ["Lesser Devil Juggernaut"] = "LesserDevilSpawn",
+    ["Desert Claw"] = "DesertClaw1", ["Bandit"] = "Bandit2Spawn", ["Wolf Hunter"] = "WoldSpawn",
+    ["Wind Monk"] = "WindMageSpawn", ["Lowly Goblin"] = "LowlyGoblinn", ["Werewolf Soldier"] = "WerewolfSoldierSpawn"
+}
 
 -- Data Profile Storage Logic
 local function saveConfig()
@@ -93,8 +98,7 @@ local function loadConfig()
                 SPELL_ACTIVE = data.SPELL_ACTIVE or false
                 DRAGON_BALL_ACTIVE = data.DRAGON_BALL_ACTIVE or false
                 
-                -- FIXED: Fail-safe ensures corrupted array files fall back to standard coordinates seamlessly [INDEX]
-                if data.currentOffset and #data.currentOffset >= 3 then
+                if data.currentOffset and type(data.currentOffset) == "table" and #data.currentOffset >= 3 then
                     currentOffset = Vector3.new(
                         tonumber(data.currentOffset[1]) or 0, 
                         tonumber(data.currentOffset[2]) or 5, 
@@ -318,21 +322,13 @@ createSlider("🔄 Orbit Position", -180, 180, 0, 360)
 createSlider("📐 Height", -20, 30, 5, 410)
 createSlider("📏 Distance", 0, 50, 15, 460)
 
--- Mobile & PC Dragging Code for Main Frame Top Header Panel
+-- Header Dragging Mechanics Panel
 local dragging, dragStart, startPos = false, nil, nil
 frame.InputBegan:Connect(function(input) if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then dragging, dragStart, startPos = true, input.Position, frame.Position end end)
 UIS.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then local delta = input.Position - dragStart frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
 UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
 
--- ============================================================================
--- 💎 CHUNK 3: LOW-OVERHEAD REAL-TIME CACHE & SELECTION ENGINES
--- ============================================================================
-
--- FIXED: Removed local keywords so data goes straight into Chunk 1 global scope tables
-activeChestsCache = {}
-activeDragonBallsCache = {}
-
--- Bulletproof streaming scanner replaces frame-by-frame scans to stop lag
+-- Low-Overhead Event Scanner Pipeline Setup
 local function initializeStreamingCache()
     local entities = workspace:WaitForChild("Entities")
     local eventsFolder = entities:WaitForChild("Events")
@@ -347,38 +343,30 @@ local function initializeStreamingCache()
         end
     end
 
-    -- Watch assets entry point natively
     eventsFolder.DescendantAdded:Connect(processObject)
     workspace.DescendantAdded:Connect(function(descendant)
-        if string.match(descendant.Name, "^Dragon Ball %d+$") then
-            table.insert(activeDragonBallsCache, descendant)
-        end
+        if string.match(descendant.Name, "^Dragon Ball %d+$") then table.insert(activeDragonBallsCache, descendant) end
     end)
     
-    -- Fast initial load sweep (runs once only)
     for _, item in ipairs(eventsFolder:GetDescendants()) do processObject(item) end
     for _, item in ipairs(workspace:GetChildren()) do if string.match(item.Name, "^Dragon Ball %d+$") then table.insert(activeDragonBallsCache, item) end end
 end
 task.spawn(initializeStreamingCache)
 
--- Dragon Ball Fast Cache Scanner
+-- Prompt Target Evaluators
 local function getActiveDragonBallPrompt()
+    if not DRAGON_BALL_ACTIVE then return nil, nil end
     for i = #activeDragonBallsCache, 1, -1 do
         local obj = activeDragonBallsCache[i]
-        if not obj or not obj.Parent then
-            table.remove(activeDragonBallsCache, i)
-            continue
-        end
+        if not obj or not obj.Parent then table.remove(activeDragonBallsCache, i) continue end
+        
         local prompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("ProximityPrompt", true)
         local targetPart = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true)
-        if prompt and targetPart then
-            return targetPart, prompt
-        end
+        if prompt and targetPart then return targetPart, prompt end
     end
     return nil, nil
 end
 
--- Round-Robin Event Chest Selector Engine (3-Second Timed Bursts)
 local function getActiveEventChestPrompt()
     if not CHEST_ACTIVE then return nil, nil, nil end
     local validChests = {}
@@ -405,10 +393,7 @@ local function getActiveEventChestPrompt()
 
         local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
         local targetPart = prompt and (prompt.Parent:IsA("BasePart") and prompt.Parent or item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true))
-        
-        if prompt and targetPart then
-            table.insert(validChests, {prompt = prompt, model = item, part = targetPart})
-        end
+        if prompt and targetPart then table.insert(validChests, {prompt = prompt, model = item, part = targetPart}) end
     end
 
     if #validChests == 0 then currentChestIndex = nil return nil, nil, nil end
@@ -443,17 +428,183 @@ local function getActiveEventChestPrompt()
     return finalSelection.prompt, finalSelection.model, finalSelection.part
 end
 
--- ============================================================================
--- 🎯 CHUNK 4: TARGET SELECTION & SPAWN COORD MAPPING
--- ============================================================================
+-- Dynamic asset cache tables
+activeChestsCache = {}
+activeDragonBallsCache = {}
 
+-- Bulletproof streaming scanner completely replaces loop scans to stop lag [INDEX]
+local function initializeStreamingCache()
+    local entities = workspace:WaitForChild("Entities")
+    local eventsFolder = entities:WaitForChild("Events")
+    
+    local function processObject(descendant)
+        if descendant:IsA("Model") or descendant:IsA("BasePart") then
+            if descendant.Name == "Chest" then
+                table.insert(activeChestsCache, descendant)
+            elseif string.match(descendant.Name, "^Dragon Ball %d+$") then
+                table.insert(activeDragonBallsCache, descendant)
+            end
+        end
+    end
+
+    -- Watch assets entry point natively via engine connection events [INDEX]
+    eventsFolder.DescendantAdded:Connect(processObject)
+    workspace.DescendantAdded:Connect(function(descendant)
+        if string.match(descendant.Name, "^Dragon Ball %d+$") then
+            table.insert(activeDragonBallsCache, descendant)
+        end
+    end)
+    
+    -- Fast initial load sweep (runs once only on script execution) [INDEX]
+    for _, item in ipairs(eventsFolder:GetDescendants()) do processObject(item) end
+    for _, item in ipairs(workspace:GetChildren()) do 
+        if string.match(item.Name, "^Dragon Ball %d+$") then 
+            table.insert(activeDragonBallsCache, item) 
+        end 
+    end
+end
+task.spawn(initializeStreamingCache)
+
+-- Universal Dragon Ball Detector (Absolute Highest Override Priority Layer) [INDEX]
+local function getActiveDragonBallPrompt()
+    for i = #activeDragonBallsCache, 1, -1 do
+        local obj = activeDragonBallsCache[i]
+        if not obj or not obj.Parent then
+            table.remove(activeDragonBallsCache, i)
+            continue
+        end
+        local prompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("ProximityPrompt", true)
+        local targetPart = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true)
+        if prompt and targetPart then
+            return targetPart, prompt
+        end
+    end
+    return nil, nil
+end
+
+-- Round-Robin Event Chest Selector Engine (3-Second Timed Loops) [INDEX]
+local function getActiveEventChestPrompt()
+    if not CHEST_ACTIVE then return nil, nil, nil end
+    local validChests = {}
+    
+    -- 1. Parse cache and filter out chests that have already completed 2 rounds [INDEX]
+    for i = #activeChestsCache, 1, -1 do
+        local item = activeChestsCache[i]
+        if not item or not item.Parent then
+            chestVisitTimers[item] = nil 
+            chestVisitCounts[item] = nil 
+            table.remove(activeChestsCache, i)
+            continue
+        end
+
+        if chestVisitCounts[item] and chestVisitCounts[item] >= 2 then continue end
+
+        -- Whitelisted Credit-Checker verification block [INDEX]
+        local creditedFolder = item:FindFirstChild("Credited")
+        if creditedFolder then
+            local isMyChest = false
+            for _, credit in ipairs(creditedFolder:GetChildren()) do
+                if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then 
+                    isMyChest = true 
+                    break 
+                end
+            end
+            if not isMyChest then continue end
+        end
+
+        local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
+        local targetPart = prompt and (prompt.Parent:IsA("BasePart") and prompt.Parent or item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true))
+        
+        if prompt and targetPart then
+            table.insert(validChests, {prompt = prompt, model = item, part = targetPart})
+        end
+    end
+
+    if #validChests == 0 then currentChestIndex = nil return nil, nil, nil end
+
+    -- 2. Verify if our active selection is still within its 3-second loop window [INDEX]
+    if currentChestIndex and currentChestIndex <= #validChests then
+        local activeSelection = validChests[currentChestIndex]
+        local startTime = chestVisitTimers[activeSelection.model]
+        if startTime and (os.clock() - startTime) < 3 then
+            return activeSelection.prompt, activeSelection.model, activeSelection.part
+        elseif startTime then
+            -- Time limit hit! Finalize round and increment visit array [INDEX]
+            chestVisitCounts[activeSelection.model] = (chestVisitCounts[activeSelection.model] or 0) + 1
+            chestVisitTimers[activeSelection.model] = nil 
+        end
+    end
+
+    local nextIndex = 1
+    if currentChestIndex then nextIndex = (currentChestIndex % #validChests) + 1 end
+
+    local loopsChecked = 0
+    while loopsChecked < #validChests do
+        local checkSelection = validChests[nextIndex]
+        if not chestVisitCounts[checkSelection.model] or chestVisitCounts[checkSelection.model] < 2 then break end
+        nextIndex = (nextIndex % #validChests) + 1
+        loopsChecked = loopsChecked + 1
+    end
+
+    local finalSelection = validChests[nextIndex]
+    if chestVisitCounts[finalSelection.model] and chestVisitCounts[finalSelection.model] >= 2 then 
+        currentChestIndex = nil 
+        return nil, nil, nil 
+    end
+
+    currentChestIndex = nextIndex
+    chestVisitTimers[finalSelection.model] = os.clock()
+    return finalSelection.prompt, finalSelection.model, finalSelection.part
+end
+
+-- Hand-Mapped Precise Spawn Directory (Matches your exact game paths) [INDEX]
+local spawnMap = {
+    ["Vennum"] = "VennumSpawn",
+    ["Alpha Wolf"] = "AlphaWolfSpawn",
+    ["Warlord"] = "AlphaWolfSpawn",
+    ["Terra"] = "StoneGuardian1",
+    ["Red"] = "VampireSoldierSpawn",
+    ["Alpha Desert Claw"] = "DesertClaw1",
+    ["Apex"] = "AlphaWolfSpawn",
+    ["Kraken"] = "Desert Kraken",
+    ["The Crimson Witch"] = "WindMageSpawn",
+    ["Netherwing"] = "LesserDevilSpawn",
+    ["Khamsin"] = "DesertClaw1",
+    ["Ice Golem"] = "YettiSpawn1",
+    ["Nyxar"] = "DarkSkeleton",
+    ["Word Devil"] = "LesserDevilSpawn",
+    ["Devil"] = "LesserDevilSpawn",
+    ["Medusa"] = "OgreSpawn",
+    ["Aetherion"] = "LesserDevilSpawn",
+    ["Morningstar"] = "LesserDevilSpawn",
+    ["Primal Werewolf"] = "WerewolfSoldierSpawn",
+    ["Elder Vampire"] = "VampireSoldierSpawn",
+    ["Yeti"] = "YettiSpawn1",
+    ["Vampire Soldier"] = "VampireSoldierSpawn",
+    ["Stone Guardian"] = "StoneGuardian1",
+    ["Shadow Hand Goon"] = "ShadowHandSpawn1",
+    ["Seasoned Mercenary"] = "SeasonedMercenarySpawn",
+    ["Riddled Skeleton Soldier"] = "DarkSkeleton",
+    ["Pumpkin"] = "Pumpkins",
+    ["Wolf"] = "WoldSpawn",
+    ["Mage Apprentice"] = "FireMageSpawn",
+    ["Lesser Devil Juggernaut"] = "LesserDevilSpawn",
+    ["Desert Claw"] = "DesertClaw1",
+    ["Bandit"] = "Bandit2Spawn",
+    ["Wolf Hunter"] = "WoldSpawn",
+    ["Wind Monk"] = "WindMageSpawn",
+    ["Lowly Goblin"] = "LowlyGoblinn",
+    ["Werewolf Soldier"] = "WerewolfSoldierSpawn"
+}
+
+-- Multi-Layer Target Selection Evaluator (Partial String Matches) [INDEX]
 local function getActiveFarmTarget()
     local entities = workspace:FindFirstChild("Entities")
     local enemiesFolder = entities and entities:FindFirstChild("Enemies")
     if not enemiesFolder then currentTarget = nil return nil end
     local enemiesList = enemiesFolder:GetChildren()
 
-    -- Layer 1: Priority Star Targets
+    -- LAYER 1: Starred Custom Priority Selections
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
@@ -464,7 +615,7 @@ local function getActiveFarmTarget()
         end
     end
 
-    -- Layer 2: Enabled Bosses
+    -- LAYER 2: Regular Enabled Bosses
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         local mobHum = mob:FindFirstChildOfClass("Humanoid")
@@ -474,7 +625,7 @@ local function getActiveFarmTarget()
         end
     end
 
-    -- Layer 3: Sticky Focus
+    -- LAYER 3: Sticky Check Target Memory Locking
     if currentTarget and currentTarget.Parent == enemiesFolder then
         local mobRoot = currentTarget:FindFirstChild("HumanoidRootPart")
         local mobHum = currentTarget:FindFirstChildOfClass("Humanoid")
@@ -482,11 +633,12 @@ local function getActiveFarmTarget()
             local currentLower = string.lower(currentTarget.Name)
             local isStillEnabled = false
             for name, state in pairs(targets.Mobs) do if state == "ON" and string.find(currentLower, string.lower(name), 1, true) then isStillEnabled = true break end end
+            for name, state in pairs(targets.Bosses) do if state == "ON" and string.find(currentLower, string.lower(name), 1, true) then isStillEnabled = true break end end
             if isStillEnabled then return currentTarget end
         end
     end
 
-    -- Layer 4: Standard Enabled Mobs
+    -- LAYER 4: Standard Enabled Mobs Loop
     currentTarget = nil
     for _, mob in ipairs(enemiesList) do
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
@@ -499,36 +651,170 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Active Spawn Finder (Teleports you to zone if no active enemies are parsed)
+-- Zero-Delay Static Spawn Pad Teleporter [INDEX]
 local function getActiveSpawnVicinity()
     local entities = workspace:FindFirstChild("Entities")
     local spawnsFolder = entities and entities:FindFirstChild("Spawns")
     if not spawnsFolder then return nil end
 
-    local spawnParts = spawnsFolder:GetChildren()
-
+    -- 1. Check your marked PRIORITY pads first
     for name, state in pairs(targets.Bosses) do
-        if state ~= "OFF" then
-            for _, pad in ipairs(spawnParts) do if string.find(string.lower(pad.Name), string.lower(name), 1, true) then return pad end end
+        if state == "PRIORITY" then
+            local padName = spawnMap[name]
+            local pad = padName and spawnsFolder:FindFirstChild(padName)
+            if pad then return pad end
         end
     end
     for name, state in pairs(targets.Mobs) do
-        if state ~= "OFF" then
-            for _, pad in ipairs(spawnParts) do if string.find(string.lower(pad.Name), string.lower(name), 1, true) then return pad end end
+        if state == "PRIORITY" then
+            local padName = spawnMap[name]
+            local pad = padName and spawnsFolder:FindFirstChild(padName)
+            if pad then return pad end
         end
     end
+
+    -- 2. Fall back to standard enabled targets if no priority pads match
+    for name, state in pairs(targets.Bosses) do
+        if state == "ON" then
+            local padName = spawnMap[name]
+            local pad = padName and spawnsFolder:FindFirstChild(padName)
+            if pad then return pad end
+        end
+    end
+    for name, state in pairs(targets.Mobs) do
+        if state == "ON" then
+            local padName = spawnMap[name]
+            local pad = padName and spawnsFolder:FindFirstChild(padName)
+            if pad then return pad end
+        end
+    end
+
     return nil
 end
 
--- ============================================================================
--- 🚀 CHUNK 5: DECOUPLED FLIGHT & REPEATING STATE CAROUSEL
--- ============================================================================
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     local myHum = character and character:FindFirstChildOfClass("Humanoid")
     
-    if not myRoot or (myHum and myHum.Health  0 and backpack then
+    -- Cleanup parameters: safely remove flight values if dead or turned off
+    if not myRoot or (myHum and myHum.Health <= 0) or not FARMING_ACTIVE then 
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+        currentTarget = nil
+        return 
+    end
+
+    -- 🚨 PRIORITY 1: Dragon Ball Hard-Lock (Instantly drops all other tasks)
+    if DRAGON_BALL_ACTIVE then
+        local dbPart, dbPrompt = getActiveDragonBallPrompt()
+        if dbPart and dbPrompt then
+            if not flyAnchor or flyAnchor.Parent ~= myRoot then
+                if flyAnchor then flyAnchor:Destroy() end
+                flyAnchor = Instance.new("BodyVelocity")
+                flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                flyAnchor.Velocity = Vector3.new(0, 0, 0)
+                flyAnchor.Parent = myRoot
+            end
+            myRoot.CFrame = dbPart.CFrame * CFrame.new(0, 3, 0)
+            return
+        end
+    end
+
+    -- 🎁 PRIORITY 2: Event Chest Collection Carousel (Runs if no Dragon Balls exist)
+    local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
+    if chestPrompt and chestModel and chestMiddlePart then
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+        myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 2, 0)
+        return
+    end
+
+    -- ⚔️ PRIORITY 3: Combat Target Alignment & Orbital Flying Engine
+    local currentEnemy = getActiveFarmTarget()
+    if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
+        local enemyRoot = currentEnemy.HumanoidRootPart
+        
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+        
+        -- Front-To-Back Vertical Orbit calculations using your slider layout offsets
+        local angleRad = math.rad(currentOffset.X) 
+        local orbitY = math.sin(angleRad) * currentOffset.Z + currentOffset.Y
+        local orbitZ = math.cos(angleRad) * currentOffset.Z
+        
+        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(0, orbitY, orbitZ)).Position
+        myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
+        return
+    end
+
+    -- 🌌 PRIORITY 4: Zone Pre-Teleport Latch (Hovering safely over static spawn pad)
+    local spawnPart = getActiveSpawnVicinity()
+    if spawnPart then
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+        -- Hovers 12 studs directly above spawn pad to allow triggers to safely map coordinates
+        myRoot.CFrame = spawnPart.CFrame * CFrame.new(0, 12, 0)
+    else
+        -- Safely strip constraints down if nothing is found active
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+    end
+end)
+
+-- Loop 1: Core Collectible Engine Thread (Fired smoothly on Engine Ticks)
+task.spawn(function()
+    while true do
+        RunService.Heartbeat:Wait()
+        if FARMING_ACTIVE then
+            pcall(function()
+                if DRAGON_BALL_ACTIVE then
+                    local dbPart, dbPrompt = getActiveDragonBallPrompt()
+                    if dbPrompt then 
+                        fireproximityprompt(dbPrompt) 
+                        return 
+                    end
+                end
+
+                local chestPrompt = getActiveEventChestPrompt()
+                if chestPrompt then 
+                    fireproximityprompt(chestPrompt) 
+                end
+            end)
+        end
+    end
+end)
+
+-- Loop 2: Inventory Maintenance (Auto-Equips Weapons and Grimoire Books)
+task.spawn(function()
+    while true do
+        task.wait(0.8)
+        if FARMING_ACTIVE and EQUIP_ACTIVE then 
+            pcall(function()
+                local entitiesFolder = workspace:FindFirstChild("Entities")
+                local entity = entitiesFolder and entitiesFolder:FindFirstChild(player.Name)
+                
+                -- Proximity fallback matching layer if index name switches
+                if not entity then
+                    local character = player.Character
+                    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+                    if myRoot then
+                        for _, folderChild in ipairs(entitiesFolder:GetChildren()) do
+                            local root = folderChild:FindFirstChild("HumanoidRootPart")
+                            if root and (root.Position - myRoot.Position).Magnitude  0 and backpack then
                     for _, tool in ipairs(backpack:GetChildren()) do
                         if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
                             tool.Parent = character
@@ -541,18 +827,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Lighting Framework Cleanroom: Destroys frame-killing fog layers instantly
-local function cleanAtmosphereEffects()
-    local lighting = game:GetService("Lighting")
-    local function checkAndClear(obj)
-        if obj:IsA("Atmosphere") or obj:IsA("Sky") or obj:IsA("Clouds") then obj:Destroy() end
-    end
-    lighting.ChildAdded:Connect(checkAndClear)
-    for _, child in ipairs(lighting:GetChildren()) do checkAndClear(child) end
-end
-task.spawn(cleanAtmosphereEffects)
-
--- Loop 4: Anti-Idle Engine Simulation Connection
+-- Loop 4: Anti-Idle Focus simulation listener module hook
 local VirtualUser = game:GetService("VirtualUser")
 player.Idled:Connect(function()
     pcall(function()
@@ -562,4 +837,4 @@ player.Idled:Connect(function()
     end)
 end)
 
-print("Lag Fix Master System Operational!")
+print("Master Integrated Automation Panel Fully Initialized!")
