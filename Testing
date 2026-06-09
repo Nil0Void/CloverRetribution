@@ -26,7 +26,7 @@ local flyAnchor = nil
 local phaseStartTime = os.clock()
 local characterResetTriggered = false
 local MOVE_DURATION = 10 -- Adjust walk time before stalling
-local RESET_TIME = 13    -- Time at which character resets (e.g. 3s stall)
+local RESET_TIME = 20    -- Time at which character resets (e.g. 3s stall)
 
 -- Chest Memory Cache
 local activeChestsCache = {}
@@ -667,70 +667,82 @@ task.spawn(function()
     end
 end)
 
--- Helper function to find your true character model inside workspace.Entities
-local function getTrueCharacter()
+-- Helper function to universally find your character inside workspace.Entities
+local function getEntitiesCharacter()
     local entitiesFolder = workspace:FindFirstChild("Entities")
-    if not entitiesFolder then return player.Character end -- Fallback to standard
+    if not entitiesFolder then return nil end
     
-    -- Scan the entities folder for a model matching your local player's identity
+    -- Track by matching your standard character name reference to the Entities child name
+    local standardChar = player.Character
+    if standardChar and entitiesFolder:FindFirstChild(standardChar.Name) then
+        return entitiesFolder[standardChar.Name]
+    end
+    
+    -- Fallback: Scan the folder for any model matching the game's "AiPlayer_" naming schema
     for _, child in ipairs(entitiesFolder:GetChildren()) do
-        if child:IsA("Model") and child:FindFirstChildOfClass("Humanoid") then
-            -- Match by checking if a script helper exists or simply by checking network ownership via name links
-            if child.Name == player.Name or string.find(child.Name, "^AiPlayer_") then
-                -- Double check to ensure it's you by matching standard character properties if needed
-                -- In most games shifting characters into Entities, your standard player.Character name matches this child name
-                if player.Character and child.Name == player.Character.Name then
-                    return child
-                end
+        if child:IsA("Model") and string.find(child.Name, "^AiPlayer_") then
+            -- Double check via Humanoid presence to ensure it's a valid character entity
+            if child:FindFirstChildOfClass("Humanoid") then
+                return child
             end
         end
     end
-    
-    -- Ultimate fallback if the loop above fails to find a custom folder model
-    return player.Character
+    return nil
 end
 
 task.spawn(function()
-    while true do
-        task.wait(0.5) -- Scan twice per second
-        pcall(function()
-            -- Locate your character model inside workspace.Entities dynamically
-            local trueCharacter = getTrueCharacter()
-            local myHum = trueCharacter and trueCharacter:FindFirstChildOfClass("Humanoid")
-            
-            -- Security Guard: Abort processing if your entity is dead or missing
-            if not trueCharacter or not myHum or myHum.Health <= 0 then return end
+    -- Safely locate the remote folder using your exact path structure
+    local replicatedPackage = game:GetService("ReplicatedStorage"):WaitForChild("ReplicatedPackage", 5)
+    local remotesFolder = replicatedPackage and replicatedPackage:WaitForChild("Remotes", 5)
+    local actionRemote = remotesFolder and remotesFolder:WaitForChild("action", 5)
+    
+    if not actionRemote then
+        warn("Auto-Equip Critical Error: Action remote path not found!")
+        return
+    end
 
-            -- 1. UNIVERSAL AUTO-EQUIP WEAPON HANDLER
+    while true do
+        task.wait(0.5) -- Pacing check loop interval
+        
+        pcall(function()
+            local myEntity = getEntitiesCharacter()
+            local humanoid = myEntity and myEntity:FindFirstChildOfClass("Humanoid")
+            
+            -- Guard Clause: Do nothing if your entity character is missing or dead
+            if not myEntity or not humanoid or humanoid.Health <= 0 then return end
+            
+            -- ----------------------------------------------------------------
+            -- 1. SMART WEAPON & BOOK TOGGLE LOCK
+            -- ----------------------------------------------------------------
             if WEAPON_ACTIVE then
-                -- Check the correct custom folder path for your weapon and books
-                local hasWeapon = trueCharacter:FindFirstChild("Weapon") ~= nil
-                local hasGrimoire = trueCharacter:FindFirstChild("Grimoire") ~= nil
-                local hasBeltGrimoire = trueCharacter:FindFirstChild("BeltGrimoire") ~= nil
+                local weaponModel = myEntity:FindFirstChild("Weapon")
+                local grimoireModel = myEntity:FindFirstChild("Grimoire")
+                local beltGrimoireModel = myEntity:FindFirstChild("BeltGrimoire")
                 
-                local remote = ReplicatedStorage:FindFirstChild("Remote")
-                if remote then
-                    -- If weapon is missing completely from your entity frame, fire draw remote
-                    if not hasWeapon then 
-                        remote:FireServer("EquipWeapon") 
-                    end
-                    
-                    -- If the book is still stored on your belt, fire open remote
-                    if hasBeltGrimoire and not hasGrimoire then 
-                        remote:FireServer("Book") 
-                    end
+                -- Only fire if the "Weapon" model is completely missing from your entity layout
+                if not weaponModel then
+                    actionRemote:FireServer("EquipWeapon")
+                    task.wait(0.2) -- Small cushion delay to let replication register before checking book
+                end
+                
+                -- Only fire if BeltGrimoire exists (unequipped state) AND Grimoire is missing (equipped state)
+                if beltGrimoireModel and not grimoireModel then
+                    actionRemote:FireServer("Book")
+                    task.wait(0.1)
                 end
             end
 
-            -- 2. AUTO-SPELL INVENTORY MOUNT HANDLER
+            -- ----------------------------------------------------------------
+            -- 2. INTEGRATED SPELL INVENTORY MOUNT HANDLER
+            -- ----------------------------------------------------------------
             if SPELL_ACTIVE then
                 local backpack = player:FindFirstChild("Backpack")
                 if backpack then
                     for _, tool in ipairs(backpack:GetChildren()) do
+                        -- Pull spell tools from inventory instantly into the workspace.Entities character model
                         if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
-                            -- Parent tools straight to your true character folder space
-                            tool.Parent = trueCharacter
-                            task.wait(0.01)
+                            tool.Parent = myEntity
+                            task.wait(0.02) -- Small cushion delay for smooth item mounting state transitions
                         end
                     end
                 end
@@ -738,7 +750,6 @@ task.spawn(function()
         end)
     end
 end)
-
 -- Integrated Fly, Orbit, Spawn Proximity, and Auto-Walk Cycle Loop
 RunService.RenderStepped:Connect(function()
     local character = player.Character
