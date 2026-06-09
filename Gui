@@ -92,9 +92,18 @@ local function loadConfig()
                 EQUIP_ACTIVE = data.EQUIP_ACTIVE or false
                 SPELL_ACTIVE = data.SPELL_ACTIVE or false
                 DRAGON_BALL_ACTIVE = data.DRAGON_BALL_ACTIVE or false
-                if data.currentOffset then
-                    currentOffset = Vector3.new(data.currentOffset[1], data.currentOffset[2], data.currentOffset[3])
+                
+                -- FIXED: Fail-safe ensures corrupted array files fall back to standard coordinates seamlessly [INDEX]
+                if data.currentOffset and #data.currentOffset >= 3 then
+                    currentOffset = Vector3.new(
+                        tonumber(data.currentOffset[1]) or 0, 
+                        tonumber(data.currentOffset[2]) or 5, 
+                        tonumber(data.currentOffset[3]) or 15
+                    )
+                else
+                    currentOffset = Vector3.new(0, 5, 15)
                 end
+                
                 if data.targets then
                     if data.targets.Mobs then
                         for k, v in pairs(data.targets.Mobs) do if targets.Mobs[k] then targets.Mobs[k] = tostring(v) end end
@@ -143,7 +152,7 @@ local function buildSystemButton(textOn, textOff, xPos, yPos, varName, clickCall
     btn.Parent = frame
 
     local function refresh()
-        local liveState = _G[varName] or false
+        local liveState = false
         if varName == "FARMING_ACTIVE" then liveState = FARMING_ACTIVE
         elseif varName == "CHEST_ACTIVE" then liveState = CHEST_ACTIVE
         elseif varName == "EQUIP_ACTIVE" then liveState = EQUIP_ACTIVE
@@ -319,8 +328,9 @@ UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputT
 -- 💎 CHUNK 3: LOW-OVERHEAD REAL-TIME CACHE & SELECTION ENGINES
 -- ============================================================================
 
-local activeChestsCache = {}
-local activeDragonBallsCache = {}
+-- FIXED: Removed local keywords so data goes straight into Chunk 1 global scope tables
+activeChestsCache = {}
+activeDragonBallsCache = {}
 
 -- Bulletproof streaming scanner replaces frame-by-frame scans to stop lag
 local function initializeStreamingCache()
@@ -518,117 +528,7 @@ RunService.RenderStepped:Connect(function()
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
     local myHum = character and character:FindFirstChildOfClass("Humanoid")
     
-    if not myRoot or (myHum and myHum.Health <= 0) or not FARMING_ACTIVE then 
-        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
-        currentTarget = nil
-        return 
-    end
-
-    -- PRIORITY 1: Dragon Ball Hard-Lock
-    local dbPart, dbPrompt = getActiveDragonBallPrompt()
-    if dbPart and dbPrompt then
-        if not flyAnchor or flyAnchor.Parent ~= myRoot then
-            if flyAnchor then flyAnchor:Destroy() end
-            flyAnchor = Instance.new("BodyVelocity")
-            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            flyAnchor.Velocity = Vector3.new(0, 0, 0)
-            flyAnchor.Parent = myRoot
-        end
-        myRoot.CFrame = dbPart.CFrame * CFrame.new(0, 3, 0)
-        return
-    end
-
-    -- PRIORITY 2: Event Chest Collection
-    local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
-    if chestPrompt and chestModel and chestMiddlePart then
-        if not flyAnchor or flyAnchor.Parent ~= myRoot then
-            if flyAnchor then flyAnchor:Destroy() end
-            flyAnchor = Instance.new("BodyVelocity")
-            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            flyAnchor.Velocity = Vector3.new(0, 0, 0)
-            flyAnchor.Parent = myRoot
-        end
-        myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 2, 0)
-        return
-    end
-
-    -- PRIORITY 3: Combat Target Alignment & Orbital Flying Engine
-    local currentEnemy = getActiveFarmTarget()
-    if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
-        local enemyRoot = currentEnemy.HumanoidRootPart
-        
-        if not flyAnchor or flyAnchor.Parent ~= myRoot then
-            if flyAnchor then flyAnchor:Destroy() end
-            flyAnchor = Instance.new("BodyVelocity")
-            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            flyAnchor.Velocity = Vector3.new(0, 0, 0)
-            flyAnchor.Parent = myRoot
-        end
-        
-        local angleRad = math.rad(currentOffset.X) 
-        local orbitY = math.sin(angleRad) * currentOffset.Z + currentOffset.Y
-        local orbitZ = math.cos(angleRad) * currentOffset.Z
-        
-        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(0, orbitY, orbitZ)).Position
-        myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
-        return
-    end
-
-    -- PRIORITY 4: Zone Pre-Teleport Latch (Hovering over spawn pad)
-    local spawnPart = getActiveSpawnVicinity()
-    if spawnPart then
-        if not flyAnchor or flyAnchor.Parent ~= myRoot then
-            if flyAnchor then flyAnchor:Destroy() end
-            flyAnchor = Instance.new("BodyVelocity")
-            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            flyAnchor.Velocity = Vector3.new(0, 0, 0)
-            flyAnchor.Parent = myRoot
-        end
-        -- Hovers safely 12 studs above spawn pad to allow triggers to fire cleanly
-        myRoot.CFrame = spawnPart.CFrame * CFrame.new(0, 12, 0)
-    else
-        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
-    end
-end)
-
-
--- ============================================================================
--- ⚡ CHUNK 6: BACKGROUND SUB-AUTOMATION TIMERS & CLEANROOM PERFORMANCE
--- ============================================================================
-
--- Loop 1: Prompt Execution Thread (Spams Collectibles on Engine Ticks)
-task.spawn(function()
-    while true do
-        RunService.Heartbeat:Wait()
-        if FARMING_ACTIVE then
-            pcall(function()
-                local dbPart, dbPrompt = getActiveDragonBallPrompt()
-                if dbPrompt then fireproximityprompt(dbPrompt) return end
-
-                local chestPrompt = getActiveEventChestPrompt()
-                if chestPrompt then fireproximityprompt(chestPrompt) end
-            end)
-        end
-    end
-end)
-
--- Loop 2: Inventory Maintenance (Equips Weapon/Book)
-task.spawn(function()
-    while true do
-        task.wait(0.8) -- Optimized step delay keeps connection stable
-        if FARMING_ACTIVE and enabled then -- Realigned back to your Chunk 1 flag variable
-            pcall(function()
-                local entitiesFolder = workspace:FindFirstChild("Entities")
-                local entity = entitiesFolder and entitiesFolder:FindFirstChild(player.Name)
-                
-                -- Fallback spatial lookups if index name shifts
-                if not entity then
-                    local character = player.Character
-                    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
-                    if myRoot then
-                        for _, folderChild in ipairs(entitiesFolder:GetChildren()) do
-                            local root = folderChild:FindFirstChild("HumanoidRootPart")
-                            if root and (root.Position - myRoot.Position).Magnitude  0 and backpack then
+    if not myRoot or (myHum and myHum.Health  0 and backpack then
                     for _, tool in ipairs(backpack:GetChildren()) do
                         if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
                             tool.Parent = character
@@ -663,4 +563,3 @@ player.Idled:Connect(function()
 end)
 
 print("Lag Fix Master System Operational!")
-
