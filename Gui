@@ -1,131 +1,34 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
-local FILE_NAME = "MasterOrbitalConfig.json"
 
--- Action Remotes Setup
+-- Remotes
 local remote = ReplicatedStorage
     :WaitForChild("ReplicatedPackage")
     :WaitForChild("Remotes")
     :WaitForChild("action")
 
--- Master State Management
-local FARMING_ACTIVE = false
-local CHEST_ACTIVE = false
-local EQUIP_ACTIVE = false
-local SPELL_ACTIVE = false
-local DRAGON_BALL_ACTIVE = false
+-- Safe Positions & Timers
+local SAFEZONE = Vector3.new(4315, 147, -1116)
+local FLOWER_DELAY = 0.2
+local LOOP_DELAY = 50
 
-local currentOffset = Vector3.new(0, 5, 15)
-local currentTarget = nil
-local flyAnchor = nil
+-- Auto Walk Config
+local MOVE_DURATION = 5
+local RESET_TIME = 15
 
--- Cache Queue Framework Memory Assemblies
-local activeChestsCache = {}
-local chestVisitTimers = {}
-local chestVisitCounts = {}
-local currentChestIndex = nil
-local processedChests = {}
-local activeDragonBallsCache = {}
-
--- Comprehensive Target Dictionary Mapping Parameters
-local targets = {
-    Mobs = {
-        ["Yeti"] = "OFF", ["Vampire Soldier"] = "OFF", ["Stone Guardian"] = "OFF",
-        ["Shadow Hand Goon"] = "OFF", ["Seasoned Mercenary"] = "OFF", ["Riddled Skeleton Soldier"] = "OFF",
-        ["Pumpkin"] = "OFF", ["Wolf"] = "OFF", ["Mage Apprentice"] = "OFF",
-        ["Lesser Devil Juggernaut"] = "OFF", ["Desert Claw"] = "OFF", ["Bandit"] = "OFF",
-        ["Wolf Hunter"] = "OFF", ["Wind Monk"] = "OFF", ["Lowly Goblin"] = "OFF",
-        ["Werewolf Soldier"] = "OFF"
-    },
-    Bosses = {
-        ["Vennum"] = "OFF", ["Alpha Wolf"] = "OFF", ["Warlord"] = "OFF",
-        ["Terra"] = "OFF", ["Red"] = "OFF", ["Alpha Desert Claw"] = "OFF",
-        ["Apex"] = "OFF", ["Kraken"] = "OFF", ["The Crimson Witch"] = "OFF",
-        ["Netherwing"] = "OFF", ["Khamsin"] = "OFF", ["Ice Golem"] = "OFF",
-        ["Nyxar"] = "OFF", ["Word Devil"] = "OFF", ["Devil"] = "OFF",
-        ["Medusa"] = "OFF", ["Aetherion"] = "OFF", ["Morningstar"] = "OFF",
-        ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF", ["Vampire Elite"] = "OFF"
-    }
-}
-
--- Automated Asset Removal Implementation Layer
-local function cleanseAtmosphere()
-    pcall(function()
-        local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or Lighting:FindFirstChild("Atmosphere", true)
-        if atmosphere then
-            atmosphere:Destroy()
-        end
-    end)
-end
-cleanseAtmosphere()
-Lighting.ChildAdded:Connect(cleanseAtmosphere)
-
--- Data Profile Storage Logic
-local function saveConfig()
-    if not writefile then return end
-    pcall(function()
-        writefile(FILE_NAME, HttpService:JSONEncode({
-            FARMING_ACTIVE = FARMING_ACTIVE,
-            CHEST_ACTIVE = CHEST_ACTIVE,
-            EQUIP_ACTIVE = EQUIP_ACTIVE,
-            SPELL_ACTIVE = SPELL_ACTIVE,
-            DRAGON_BALL_ACTIVE = DRAGON_BALL_ACTIVE,
-            currentOffset = {currentOffset.X, currentOffset.Y, currentOffset.Z},
-            targets = targets
-        }))
-    end)
-end
-
-local function loadConfig()
-    pcall(function()
-        if readfile and isfile and isfile(FILE_NAME) then
-            local data = HttpService:JSONDecode(readfile(FILE_NAME))
-            if data then
-                FARMING_ACTIVE = data.FARMING_ACTIVE or false
-                CHEST_ACTIVE = data.CHEST_ACTIVE or false
-                EQUIP_ACTIVE = data.EQUIP_ACTIVE or false
-                SPELL_ACTIVE = data.SPELL_ACTIVE or false
-                DRAGON_BALL_ACTIVE = data.DRAGON_BALL_ACTIVE or false
-                
-                if data.currentOffset and type(data.currentOffset) == "table" and #data.currentOffset >= 3 then
-                    currentOffset = Vector3.new(
-                        tonumber(data.currentOffset[1]) or 0, 
-                        tonumber(data.currentOffset[2]) or 5,
-                        tonumber(data.currentOffset[3]) or 15
-                    )
-                else
-                    currentOffset = Vector3.new(0, 5, 15)
-                end
-                
-                if data.targets then
-                    if data.targets.Mobs then
-                        for k, v in pairs(data.targets.Mobs) do if targets.Mobs[k] then targets.Mobs[k] = tostring(v) end end
-                    end
-                    if data.targets.Bosses then
-                        for k, v in pairs(data.targets.Bosses) do if targets.Bosses[k] then targets.Bosses[k] = tostring(v) end end
-                    end
-                end
-            end
-        end
-    end)
-end
-loadConfig()
-
--- Core Canvas Setup
+-- UI Configuration (Unified Menu)
 local gui = Instance.new("ScreenGui")
-gui.Name = "MasterOrbitalFarmingGui"
+gui.Name = "UnifiedAutomationGui"
 gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 440, 0, 560)
-frame.Position = UDim2.new(0.5, -220, 0.5, -280)
+frame.Size = UDim2.new(0, 220, 0, 300) -- Increased height slightly for 5th button
+frame.Position = UDim2.new(0.5, -110, 0.5, -150)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 2
 frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
@@ -133,371 +36,345 @@ frame.Active = true
 frame.Parent = gui
 
 local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, 0, 0, 35)
+titleLabel.Size = UDim2.new(1, 0, 0, 30)
 titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-titleLabel.Text = " Master Priority Automation Controller"
+titleLabel.Text = "Multi-Hack Control Panel"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.TextSize = 16
 titleLabel.Parent = frame
 
--- Toggle Utility Creation Factory
-local function buildSystemButton(textOn, textOff, xPos, yPos, varName, clickCallback)
+-- Scrolling Frame for Features
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, 0, 1, -30)
+scroll.Position = UDim2.new(0, 0, 0, 30)
+scroll.BackgroundTransparency = 1
+scroll.CanvasSize = UDim2.new(0, 0, 0, 310)
+scroll.ScrollBarThickness = 6
+scroll.Parent = frame
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 5)
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = scroll
+
+-- Feature Buttons Construction
+local function createButton(text, order)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 135, 0, 32)
-    btn.Position = UDim2.new(0, xPos, 0, yPos)
-    btn.Font = Enum.Font.SourceSansBold
-    btn.TextSize = 13
-    btn.Parent = frame
-    
-    local function refresh()
-        local liveState = false
-        if varName == "FARMING_ACTIVE" then liveState = FARMING_ACTIVE
-        elseif varName == "CHEST_ACTIVE" then liveState = CHEST_ACTIVE
-        elseif varName == "EQUIP_ACTIVE" then liveState = EQUIP_ACTIVE
-        elseif varName == "SPELL_ACTIVE" then liveState = SPELL_ACTIVE
-        elseif varName == "DRAGON_BALL_ACTIVE" then liveState = DRAGON_BALL_ACTIVE end
-        btn.Text = liveState and textOn or textOff
-        btn.BackgroundColor3 = liveState and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
-        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    end
-    refresh()
-    btn.MouseButton1Click:Connect(function()
-        clickCallback()
-        refresh()
-        saveConfig()
-    end)
+    btn.Size = UDim2.new(0, 200, 0, 45)
+    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSans
+    btn.TextSize = 16
+    btn.LayoutOrder = order
+    btn.Text = text -- Correctly label them immediately on startup
+    btn.Parent = scroll
+    return btn
 end
 
--- Render Row 1 Controls
-buildSystemButton("Auto Farm: ON", "Auto Farm: OFF", 10, 45, "FARMING_ACTIVE", function() FARMING_ACTIVE = not FARMING_ACTIVE end)
-buildSystemButton(" Chests: ON", " Chests: OFF", 152, 45, "CHEST_ACTIVE", function() CHEST_ACTIVE = not CHEST_ACTIVE end)
-buildSystemButton(" Dragon Ball: ON", " Dragon Ball: OFF", 295, 45, "DRAGON_BALL_ACTIVE", function() DRAGON_BALL_ACTIVE = not DRAGON_BALL_ACTIVE end)
+-- Named explicitly from the beginning
+local bWeapon = createButton("⚔️ Auto Equip: OFF", 1)
+local bSpell = createButton("✨ Auto Spells: OFF", 2)
+local bBall = createButton("🐉 Auto Dragon Ball: OFF", 3)
+local bFlower = createButton("🌸 Flower Farm: OFF", 4)
+local bWalk = createButton("🚶 Auto Walk Cycle: OFF", 5)
 
--- Render Row 2 Controls
-buildSystemButton(" Equip: ON", " Equip: OFF", 80, 82, "EQUIP_ACTIVE", function() EQUIP_ACTIVE = not EQUIP_ACTIVE end)
-buildSystemButton(" Spells: ON", " Spells: OFF", 225, 82, "SPELL_ACTIVE", function() SPELL_ACTIVE = not SPELL_ACTIVE end)
+-- Toggle Tracking States
+local flags = {
+    weapon = false,
+    spell = false,
+    dragonBall = false,
+    flower = false,
+    walk = false
+}
 
--- Tri-State List Renderer Engine
-local function createCategoryScroll(titleText, xOffset, targetSubTable)
-    local container = Instance.new("Frame")
-    container.Size = UDim2.new(0, 205, 0, 220)
-    container.Position = UDim2.new(0, xOffset, 0, 125)
-    container.BackgroundTransparency = 1
-    container.Parent = frame
+-- Button Interactions
+bWeapon.MouseButton1Click:Connect(function()
+    flags.weapon = not flags.weapon
+    bWeapon.Text = flags.weapon and "⚔️ Auto Equip: ON" or "⚔️ Auto Equip: OFF"
+    bWeapon.BackgroundColor3 = flags.weapon and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
 
-    local catTitle = Instance.new("TextLabel")
-    catTitle.Size = UDim2.new(1, 0, 0, 20)
-    catTitle.BackgroundTransparency = 1
-    catTitle.Text = titleText
-    catTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
-    catTitle.Font = Enum.Font.SourceSansBold
-    catTitle.TextSize = 14
-    catTitle.Parent = container
+bSpell.MouseButton1Click:Connect(function()
+    flags.spell = not flags.spell
+    bSpell.Text = flags.spell and "✨ Auto Spells: ON" or "✨ Auto Spells: OFF"
+    bSpell.BackgroundColor3 = flags.spell and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
 
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Size = UDim2.new(1, 0, 1, -25)
-    scroll.Position = UDim2.new(0, 0, 0, 25)
-    scroll.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scroll.ScrollBarThickness = 5
-    scroll.Parent = container
+bBall.MouseButton1Click:Connect(function()
+    flags.dragonBall = not flags.dragonBall
+    bBall.Text = flags.dragonBall and "🐉 Auto Dragon Ball: ON" or "🐉 Auto Dragon Ball: OFF"
+    bBall.BackgroundColor3 = flags.dragonBall and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
 
-    local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0, 4)
-    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    layout.Parent = scroll
+bFlower.MouseButton1Click:Connect(function()
+    flags.flower = not flags.flower
+    bFlower.Text = flags.flower and "🌸 Flower Farm: ON" or "🌸 Flower Farm: OFF"
+    bFlower.BackgroundColor3 = flags.flower and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
 
-    local sortedNames = {}
-    for name in pairs(targetSubTable) do table.insert(sortedNames, name) end
-    table.sort(sortedNames)
+bWalk.MouseButton1Click:Connect(function()
+    flags.walk = not flags.walk
+    bWalk.Text = flags.walk and "🚶 Auto Walk Cycle: ON" or "🚶 Auto Walk Cycle: OFF"
+    bWalk.BackgroundColor3 = flags.walk and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+    
+    -- Stop movement forces immediately if toggled off
+    if not flags.walk then
+        local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid:Move(Vector3.new(0, 0, 0), false) end
+    end
+end)
 
-    for _, mobName in ipairs(sortedNames) do
-        local mobBtn = Instance.new("TextButton")
-        mobBtn.Size = UDim2.new(0, 190, 0, 30)
-        mobBtn.Font = Enum.Font.SourceSans
-        mobBtn.TextSize = 13
-        mobBtn.Parent = scroll
-        
-        local function syncVisuals()
-            local state = targetSubTable[mobName]
-            if state == "ON" then
-                mobBtn.Text = mobName .. " [ON]"
-                mobBtn.BackgroundColor3 = Color3.fromRGB(56, 92, 145)
-                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            elseif state == "PRIORITY" then
-                mobBtn.Text = " " .. mobName .. " [PRIO]"
-                mobBtn.BackgroundColor3 = Color3.fromRGB(168, 126, 42)
-                mobBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            else
-                mobBtn.Text = mobName .. " [OFF]"
-                mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-                mobBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-            end
+-- Bulletproof Mobile & PC Dragging Code
+local dragging = false
+local dragStart, startPos
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- Helper Functions
+local function getRoot()
+    local char = player.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getPrompt(obj)
+    for _, v in ipairs(obj:GetDescendants()) do
+        if v:IsA("ProximityPrompt") then return v end
+    end
+    return nil
+end
+
+local function getPart(obj)
+    if obj:IsA("BasePart") then return obj end
+    for _, v in ipairs(obj:GetDescendants()) do
+        if v:IsA("BasePart") then return v end
+    end
+    return nil
+end
+
+local function getEntity()
+    local entitiesFolder = workspace:FindFirstChild("Entities")
+    if not entitiesFolder then return nil end
+    
+    local myEntity = entitiesFolder:FindFirstChild(player.Name)
+    if myEntity then return myEntity end
+
+    local myRoot = getRoot()
+    if not myRoot then return nil end
+
+    for _, entity in ipairs(entitiesFolder:GetChildren()) do
+        local root = entity:FindFirstChild("HumanoidRootPart")
+        if root and (root.Position - myRoot.Position).Magnitude < 4 then
+            return entity
         end
-        syncVisuals()
-        
-        mobBtn.MouseButton1Click:Connect(function()
-            local current = targetSubTable[mobName]
-            if current == "OFF" then targetSubTable[mobName] = "ON"
-            elseif current == "ON" then targetSubTable[mobName] = "PRIORITY" currentTarget = nil
-            else targetSubTable[mobName] = "OFF" currentTarget = nil end
-            syncVisuals()
-            saveConfig()
+    end
+    return nil
+end
+
+-- 1 & 2. Auto Equip Weapon & Grimoire / Auto Spells Loop
+task.spawn(function()
+    while true do
+        task.wait(1)
+        pcall(function()
+            local character = player.Character
+            if not character or not character:FindFirstChildOfClass("Humanoid") or character:FindFirstChildOfClass("Humanoid").Health <= 0 then
+                return
+            end
+
+            if flags.weapon then
+                local entity = getEntity()
+                if entity then
+                    if not entity:FindFirstChild("Weapon") then remote:FireServer("EquipWeapon") end
+                    if not entity:FindFirstChild("Grimoire") then remote:FireServer("Book") end
+                end
+            end
+
+            if flags.spell then
+                local backpack = player:FindFirstChild("Backpack")
+                if backpack then
+                    for _, tool in ipairs(backpack:GetChildren()) do
+                        if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" and tool.Parent == backpack then
+                            tool.Parent = character
+                            task.wait(0.01)
+                        end
+                    end
+                end
+            end
         end)
     end
-    scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
-end
+end)
 
-createCategoryScroll(" Mobs List", 10, targets.Mobs)
-createCategoryScroll(" Bosses & Elites", 225, targets.Bosses)
+-- 3. Dragon Ball Auto Collector Loop
+task.spawn(function()
+    while true do
+        task.wait(2)
+        if flags.dragonBall then
+            pcall(function()
+                local ignoreFolder = workspace:FindFirstChild("Ignore")
+                local foundBall = false
 
--- Slider Construction Factory Module
-local function createSlider(axisName, minVal, maxVal, defaultStartVal, yOffset)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -20, 0, 20)
-    label.Position = UDim2.new(0, 10, 0, yOffset)
-    label.BackgroundTransparency = 1
-    local suffix = (axisName:find("Orbit") and "°") or " studs"
-    label.TextColor3 = Color3.fromRGB(220, 220, 220)
-    label.Font = Enum.Font.SourceSansBold
-    label.TextSize = 13
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = frame
+                if ignoreFolder then
+                    for _, obj in ipairs(ignoreFolder:GetChildren()) do
+                        if string.match(obj.Name, "^Dragon Ball %d+$") then
+                            local part = getPart(obj)
+                            local root = getRoot()
+                            if part and root then
+                                foundBall = true
+                                root.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+                                task.wait(0.1)
+                                
+                                local prompt = getPrompt(obj)
+                                if prompt then
+                                    for i = 1, 10 do
+                                        if not flags.dragonBall then break end
+                                        fireproximityprompt(prompt)
+                                        task.wait(0.05)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
 
-    local sliderBg = Instance.new("Frame")
-    sliderBg.Size = UDim2.new(1, -20, 0, 8)
-    sliderBg.Position = UDim2.new(0, 10, 0, yOffset + 20)
-    sliderBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    sliderBg.BorderSizePixel = 0
-    sliderBg.Parent = frame
-
-    local sliderBtn = Instance.new("TextButton")
-    sliderBtn.Size = UDim2.new(0, 16, 0, 16)
-    sliderBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-    sliderBtn.Text = ""
-    sliderBtn.BorderSizePixel = 0
-    sliderBtn.Parent = sliderBg
-
-    local function refreshSliderVisuals()
-        local liveValue = defaultStartVal
-        if axisName == " Orbit Position" then liveValue = currentOffset.X
-        elseif axisName == " Height" then liveValue = currentOffset.Y
-        elseif axisName == " Distance" then liveValue = currentOffset.Z end
-        label.Text = axisName .. ": " .. tostring(liveValue) .. suffix
-        local pct = (liveValue - minVal) / (maxVal - minVal)
-        sliderBtn.Position = UDim2.new(pct, -8, 0.5, -8)
+                if not foundBall and flags.dragonBall then
+                    local root = getRoot()
+                    if root then root.CFrame = CFrame.new(SAFEZONE) end
+                end
+            end)
+        end
     end
-    refreshSliderVisuals()
+end)
 
-    local activeDragging = false
-    local function updateSliderPosition(inputPosition)
-        local barAbsPos = sliderBg.AbsolutePosition.X
-        local barAbsSize = sliderBg.AbsoluteSize.X
-        local clmp = math.clamp((inputPosition.X - barAbsPos) / barAbsSize, 0, 1)
-        local value = math.round(minVal + (clmp * (maxVal - minVal)))
-        
-        if axisName == " Orbit Position" then currentOffset = Vector3.new(value, currentOffset.Y, currentOffset.Z)
-        elseif axisName == " Height" then currentOffset = Vector3.new(currentOffset.X, value, currentOffset.Z)
-        elseif axisName == " Distance" then currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, value) end
-        
-        refreshSliderVisuals()
-        saveConfig()
+-- 4. Flower Farm Loop
+task.spawn(function()
+    while true do
+        if flags.flower then
+            pcall(function()
+                local folder = workspace:FindFirstChild("Entities")
+                folder = folder and folder:FindFirstChild("Interactions")
+                folder = folder and folder:FindFirstChild("Collectibles")
+                folder = folder and folder:FindFirstChild("Flowers")
+                
+                if not folder then return end
+
+                local HRP = getRoot()
+                if not HRP then return end
+
+                local flowers = {}
+                for _, v in ipairs(folder:GetDescendants()) do
+                    if getPrompt(v) then table.insert(flowers, v) end
+                end
+
+                table.sort(flowers, function(a, b)
+                    local aLily = a.Name:lower():find("lily") ~= nil
+                    local bLily = b.Name:lower():find("lily") ~= nil
+                    if aLily ~= bLily then return aLily end
+                    return a.Name < b.Name
+                end)
+
+                for _, flower in ipairs(flowers) do
+                    if not flags.flower then break end
+                    local part = getPart(flower)
+                    local prompt = getPrompt(flower)
+
+                    if part and prompt then
+                        HRP.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+                        local startTime = tick()
+                        while flags.flower and tick() - startTime < FLOWER_DELAY do
+                            if prompt and prompt.Parent then fireproximityprompt(prompt) end
+                            task.wait()
+                        end
+                    end
+                end
+
+                if flags.flower then
+                    HRP.CFrame = CFrame.new(SAFEZONE)
+                    local elapsed = 0
+                    while flags.flower and elapsed < LOOP_DELAY do
+                        task.wait(0.1)
+                        elapsed = elapsed + 0.1
+                    end
+                end
+            end)
+        else
+            task.wait(0.5)
+        end
     end
+end)
 
-    sliderBtn.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then activeDragging = true end end)
-    UIS.InputChanged:Connect(function(input) if activeDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then updateSliderPosition(input.Position) end end)
-    UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then activeDragging = false end end)
-end
+-- 5. Auto Walk & Reset Connection
+local phaseStartTime = os.clock()
+local characterResetTriggered = false
 
-createSlider(" Orbit Position", -180, 180, 0, 360)
-createSlider(" Height", -20, 30, 5, 410)
-createSlider(" Distance", 0, 50, 15, 460)
-
--- Header Dragging Mechanics Panel
-local dragging, dragStart, startPos = false, nil, nil
-frame.InputBegan:Connect(function(input) if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then dragging, dragStart, startPos = true, input.Position, frame.Position end end)
-UIS.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then local delta = input.Position - dragStart frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
-UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
-
--- Low-Overhead Event Scanner Pipeline Setup
-local function initializeStreamingCache()
-    local entities = workspace:WaitForChild("Entities")
-    local eventsFolder = entities:WaitForChild("Events")
+RunService.RenderStepped:Connect(function()
+    if not flags.walk then 
+        characterResetTriggered = false
+        return 
+    end
     
-    local function processObject(descendant)
-        if descendant:IsA("Model") or descendant:IsA("BasePart") then
-            if descendant.Name == "Chest" then
-                table.insert(activeChestsCache, descendant)
-            elseif string.match(descendant.Name, "^Dragon Ball %d+$") then
-                table.insert(activeDragonBallsCache, descendant)
+    local character = player.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local primaryPart = character and character.PrimaryPart
+    
+    if humanoid and primaryPart and humanoid.Health > 0 then
+        local elapsed = os.clock() - phaseStartTime
+        
+        if elapsed < MOVE_DURATION then
+            -- Phase 1: Keep pushing forward based on camera orientation
+            local moveDirection = primaryPart.CFrame.LookVector
+            humanoid:Move(moveDirection, false)
+        elseif elapsed < RESET_TIME then
+            -- Phase 2: Stand completely still
+            humanoid:Move(Vector3.new(0, 0, 0), false)
+        else
+            -- Phase 3: Trigger the clean character death reset
+            if not characterResetTriggered then
+                characterResetTriggered = true
+                humanoid.Health = 0
             end
         end
-    end
-    eventsFolder.DescendantAdded:Connect(processObject)
-    workspace.DescendantAdded:Connect(function(descendant)
-        if string.match(descendant.Name, "^Dragon Ball %d+$") then table.insert(activeDragonBallsCache, descendant) end
-    end)
-    
-    for _, item in ipairs(eventsFolder:GetDescendants()) do processObject(item) end
-    for _, item in ipairs(workspace:GetChildren()) do if string.match(item.Name, "^Dragon Ball %d+$") then table.insert(activeDragonBallsCache, item) end end
-end
-task.spawn(initializeStreamingCache)
-
--- Prompt Target Evaluators
-local function getActiveDragonBallPrompt()
-    if not DRAGON_BALL_ACTIVE then return nil, nil end
-    for i = #activeDragonBallsCache, 1, -1 do
-        local obj = activeDragonBallsCache[i]
-        if not obj or not obj.Parent then table.remove(activeDragonBallsCache, i) continue end
-        local prompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("ProximityPrompt", true)
-        local targetPart = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true)
-        if prompt and targetPart then return targetPart, prompt end
-    end
-    return nil, nil
-end
-
-local function getActiveEventChestPrompt()
-    if not CHEST_ACTIVE then return nil, nil, nil end
-    local validChests = {}
-    for i = #activeChestsCache, 1, -1 do
-        local item = activeChestsCache[i]
-        if not item or not item.Parent then
-            chestVisitTimers[item] = nil 
-            chestVisitCounts[item] = nil 
-            table.remove(activeChestsCache, i)
-            continue
-        end
-        if chestVisitCounts[item] and chestVisitCounts[item] >= 2 then continue end
-        local creditedFolder = item:FindFirstChild("Credited")
-        if creditedFolder then
-            local isMyChest = false
-            for _, credit in ipairs(creditedFolder:GetChildren()) do
-                if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then isMyChest = true break end
-            end
-            if not isMyChest then continue end
-        end
-        local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
-        local targetPart = prompt and (prompt.Parent:IsA("BasePart") and prompt.Parent or item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true))
-        if prompt and targetPart then table.insert(validChests, {prompt = prompt, model = item, part = targetPart}) end
-    end
-    if #validChests == 0 then currentChestIndex = nil return nil, nil, nil end
-    if currentChestIndex and currentChestIndex <= #validChests then
-        local activeSelection = validChests[currentChestIndex]
-        local startTime = chestVisitTimers[activeSelection.model]
-        if startTime and (os.clock() - startTime) < 3 then
-            return activeSelection.prompt, activeSelection.model, activeSelection.part
-        elseif startTime then
-            chestVisitCounts[activeSelection.model] = (chestVisitCounts[activeSelection.model] or 0) + 1
-            chestVisitTimers[activeSelection.model] = nil 
-        end
-    end
-    local nextIndex = 1
-    if currentChestIndex then nextIndex = (currentChestIndex % #validChests) + 1 end
-    local loopsChecked = 0
-    while loopsChecked < #validChests do
-        local checkSelection = validChests[nextIndex]
-        if not chestVisitCounts[checkSelection.model] or chestVisitCounts[checkSelection.model] < 2 then break end
-        nextIndex = (nextIndex % #validChests) + 1
-        loopsChecked = loopsChecked + 1
-    end
-    local finalSelection = validChests[nextIndex]
-    if chestVisitCounts[finalSelection.model] and chestVisitCounts[finalSelection.model] >= 2 then currentChestIndex = nil return nil, nil, nil end
-    currentChestIndex = nextIndex
-    chestVisitTimers[finalSelection.model] = os.clock()
-    return finalSelection.prompt, finalSelection.model, finalSelection.part
-end
-
-    -- PRIORITY 4: Zone Pre-Teleport Latch (Hovering safely over static spawn pad)
-    local spawnPart = getActiveSpawnVicinity()
-    if spawnPart then
-        if not flyAnchor or flyAnchor.Parent ~= myRoot then
-            if flyAnchor then flyAnchor:Destroy() end
-            flyAnchor = Instance.new("BodyVelocity")
-            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            flyAnchor.Velocity = Vector3.new(0, 0, 0)
-            flyAnchor.Parent = myRoot
-        end
-        -- Hovers 12 studs directly above spawn pad to allow triggers to safely map coordinates
-        myRoot.CFrame = spawnPart.CFrame * CFrame.new(0, 12, 0)
     else
-        -- Safely strip constraints down if nothing is found active
-        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+        -- Instantly refresh clock tracking while dead to pick up smoothly when respawning
+        phaseStartTime = os.clock()
+        characterResetTriggered = false
     end
 end)
 
--- Loop 1: Core Collectible Engine Thread (Fired smoothly on Engine Ticks)
-task.spawn(function()
-    while true do
-        RunService.Heartbeat:Wait()
-        if FARMING_ACTIVE then
-            pcall(function()
-                if DRAGON_BALL_ACTIVE then
-                    local dbPart, dbPrompt = getActiveDragonBallPrompt()
-                    if dbPrompt then 
-                        fireproximityprompt(dbPrompt) 
-                        return 
-                    end
-                end
-                local chestPrompt = getActiveEventChestPrompt()
-                if chestPrompt then 
-                    fireproximityprompt(chestPrompt) 
-                end
-            end)
-        end
-    end
-end)
+-- Anti-AFK / Anti-Idle Engine Connection
+local virtualUser = game:GetService("VirtualUser")
 
--- Loop 2: Inventory Maintenance (Auto-Equips Weapons and Items)
-task.spawn(function()
-    while true do
-        task.wait(0.8)
-        if FARMING_ACTIVE and EQUIP_ACTIVE then 
-            pcall(function()
-                local backpack = player:FindFirstChildOfClass("Backpack")
-                local character = player.Character
-                if backpack and character then
-                    for _, tool in ipairs(backpack:GetChildren()) do
-                        if tool:IsA("Tool") then
-                            tool.Parent = character
-                            task.wait(0.05)
-                        end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
--- Loop 3: Combat Spell Automation (Fires periodically to use available magic)
-task.spawn(function()
-    while true do
-        task.wait(1.5)
-        if FARMING_ACTIVE and SPELL_ACTIVE then
-            pcall(function()
-                local backpack = player:FindFirstChildOfClass("Backpack")
-                local character = player.Character
-                if backpack and character then
-                    for _, tool in ipairs(backpack:GetChildren()) do
-                        if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
-                            tool.Parent = character
-                            task.wait(0.05)
-                        end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
--- Loop 4: Anti-Idle Focus simulation listener module hook (Prevents 20-minute AFK kicks)
-local VirtualUser = game:GetService("VirtualUser")
 player.Idled:Connect(function()
-    pcall(function()
-        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-        task.wait(1)
-        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-    end)
+    -- Simulates a hardware click to reset Roblox's internal 20-minute idle timer
+    virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait(0.5)
+    virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
-print("Master Integrated Automation Panel Fully Initialized!")
+
+print("All features initialized with static labels. Ready!")
