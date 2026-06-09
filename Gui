@@ -72,20 +72,27 @@ local spawnMap = {
 }
 
 -- Data Profile Storage Logic
-local function saveConfig()
-    if not writefile then return end
+local function loadConfig()
     pcall(function()
-        writefile(FILE_NAME, HttpService:JSONEncode({
-            FARMING_ACTIVE = FARMING_ACTIVE,
-            CHEST_ACTIVE = CHEST_ACTIVE,
-            EQUIP_ACTIVE = EQUIP_ACTIVE,
-            SPELL_ACTIVE = SPELL_ACTIVE,
-            DRAGON_BALL_ACTIVE = DRAGON_BALL_ACTIVE,
-            currentOffset = {currentOffset.X, currentOffset.Y, currentOffset.Z},
-            targets = targets
-        }))
-    end)
-end
+        if readfile and isfile and isfile(FILE_NAME) then
+            local data = HttpService:JSONDecode(readfile(FILE_NAME))
+            if data then
+                FARMING_ACTIVE = data.FARMING_ACTIVE or false
+                CHEST_ACTIVE = data.CHEST_ACTIVE or false
+                EQUIP_ACTIVE = data.EQUIP_ACTIVE or false
+                SPELL_ACTIVE = data.SPELL_ACTIVE or false
+                DRAGON_BALL_ACTIVE = data.DRAGON_BALL_ACTIVE or false
+                
+                -- FIXED: Safe variable type check prevents startup nil crashes
+                if data.currentOffset and type(data.currentOffset) == "table" and #data.currentOffset >= 3 then
+                    currentOffset = Vector3.new(
+                        tonumber(data.currentOffset[1]) or 0, 
+                        tonumber(data.currentOffset[2]) or 5, 
+                        tonumber(data.currentOffset[3]) or 15
+                    )
+                else
+                    currentOffset = Vector3.new(0, 5, 15)
+                end
 
 local function loadConfig()
     pcall(function()
