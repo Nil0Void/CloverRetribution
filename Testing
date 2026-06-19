@@ -817,13 +817,13 @@ task.spawn(function()
                 -- Only fire if the "Weapon" model is completely missing from your entity layout
                 if not weaponModel then
                     actionRemote:FireServer("EquipWeapon")
-                    task.wait(3) -- Small cushion delay to let replication register before checking book
+                    task.wait(0.2) -- Small cushion delay to let replication register before checking book
                 end
                 
                 -- Only fire if BeltGrimoire exists (unequipped state) AND Grimoire is missing (equipped state)
                 if beltGrimoireModel and not grimoireModel then
                     actionRemote:FireServer("Book")
-                    task.wait(3)
+                    task.wait(0.1)
                 end
             end
 
@@ -837,7 +837,7 @@ task.spawn(function()
                         -- Pull spell tools from inventory instantly into the workspace.Entities character model
                         if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
                             tool.Parent = myEntity
-                            task.wait(0.02) -- Small cushion delay for smooth item mounting state transitions
+                            task.wait(0.1) -- Small cushion delay for smooth item mounting state transitions
                         end
                     end
                 end
