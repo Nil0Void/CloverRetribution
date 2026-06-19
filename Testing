@@ -817,13 +817,13 @@ task.spawn(function()
                 -- Only fire if the "Weapon" model is completely missing from your entity layout
                 if not weaponModel then
                     actionRemote:FireServer("EquipWeapon")
-                    task.wait(0.2) -- Small cushion delay to let replication register before checking book
+                    task.wait(3) -- Small cushion delay to let replication register before checking book
                 end
                 
                 -- Only fire if BeltGrimoire exists (unequipped state) AND Grimoire is missing (equipped state)
                 if beltGrimoireModel and not grimoireModel then
                     actionRemote:FireServer("Book")
-                    task.wait(0.1)
+                    task.wait(3)
                 end
             end
 
