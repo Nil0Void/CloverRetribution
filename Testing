@@ -51,7 +51,8 @@ local targets = {
         ["Netherwing"] = "OFF", ["Khamsin"] = "OFF", ["Ice Golem"] = "OFF",
         ["Nyxar"] = "OFF", ["Word Devil"] = "OFF", ["Devil"] = "OFF",
         ["Medusa"] = "OFF", ["Aetherion"] = "OFF", ["Morningstar"] = "OFF",
-        ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF", ["Vampire Elite"] = "OFF"
+        ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF", ["Vampire Elite"] = "OFF",
+        ["Aetherstone Golem"] = "OFF"
     }
 }
 
