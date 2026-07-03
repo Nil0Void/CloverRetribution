@@ -11,19 +11,16 @@ local iceGolemActive = false
 local aetherstoneActive = false
 
 -- ============================================================================
--- ROBUST LOADER & CLEANUP (Waits until paths definitely exist)
+-- ROBUST LOADER & CLEANUP
 -- ============================================================================
 task.spawn(function()
-    -- Clear atmosphere right away
     local atmosphere = Lighting:FindFirstChildWhichIsA("Atmosphere") or Lighting:FindFirstChild("Atmosphere")
     if atmosphere then atmosphere:Destroy() end
 
-    -- Safe, infinite wait for Map assets to load onto mobile client
     local map = Workspace:WaitForChild("Map", 15)
     if map then
         local iceZone = map:WaitForChild("IceGolemZone", 10)
         if iceZone then
-            -- Handle boss zone cleanup
             local bossZone = iceZone:WaitForChild("IceBossZone", 5)
             if bossZone then
                 local walls = bossZone:FindFirstChild("InvisBossRoomWalls")
@@ -31,11 +28,8 @@ task.spawn(function()
 
                 local roof = bossZone:FindFirstChild("RoofParts")
                 if roof then roof:Destroy() end
-                print("[Success] IceBossZone clutter successfully removed!")
             end
         end
-    else
-        warn("[Error] Could not find Workspace.Map after 15 seconds. Check game path names!")
     end
 end)
 
@@ -93,24 +87,30 @@ local function updateButtonVisual(button, isActive, activeColor, inactiveColor, 
     button.Text = textPrefix .. (isActive and ": ON" or ": OFF")
 end
 
-local function isMobSpawned(mobName)
+-- Universal scanning engine for targets
+local function findTargetsInEnemies(nameToFind)
     local entities = Workspace:FindFirstChild("Entities")
     local enemies = entities and entities:FindFirstChild("Enemies")
+    local found = {}
     if enemies then
         for _, enemy in ipairs(enemies:GetChildren()) do
-            if string.find(enemy.Name, mobName) then
-                return true
+            if string.find(enemy.Name, nameToFind) then
+                table.insert(found, enemy)
             end
         end
     end
-    return false
+    return found
+end
+
+local function isMobSpawned(mobName)
+    local targets = findTargetsInEnemies(mobName)
+    return #targets > 0
 end
 
 -- UNIVERSAL CANCELLABLE INSTANT INTERACT
 local function instantTpAndInteract(targetInstance, duration, loopFlagCheck)
     local startTime = os.clock()
     
-    -- Smart Part Locator: Gets the actual visual part whether target is a Model or a BasePart
     local targetPart = nil
     if targetInstance:IsA("BasePart") then
         targetPart = targetInstance
@@ -120,7 +120,6 @@ local function instantTpAndInteract(targetInstance, duration, loopFlagCheck)
     
     if not targetPart then return end
 
-    -- Extract interactable items
     local prompts = {}
     local clickDetectors = {}
     for _, obj in ipairs(targetInstance:GetDescendants()) do
@@ -129,7 +128,7 @@ local function instantTpAndInteract(targetInstance, duration, loopFlagCheck)
     end
 
     while os.clock() - startTime < duration do
-        if not _G[loopFlagCheck] or isMobSpawned("Golem") then break end
+        if not _G[loopFlagCheck] then break end
         
         local rootPart = character and character:FindFirstChild("HumanoidRootPart")
         if rootPart then
@@ -151,12 +150,11 @@ local function instantTpAndInteract(targetInstance, duration, loopFlagCheck)
 end
 
 -- ============================================================================
--- FIXED ICE GOLEM LOOP
+-- ICE GOLEM LOOP (With Crystals -> IceWall Transition)
 -- ============================================================================
 local function startIceGolemLoop()
     _G.IceLoopRunning = true
     task.spawn(function()
-        -- Dynamic deep path check
         local map = Workspace:FindFirstChild("Map")
         local iceZone = map and map:FindFirstChild("IceGolemZone")
         local activation = iceZone and iceZone:FindFirstChild("Activation")
@@ -164,6 +162,7 @@ local function startIceGolemLoop()
         while iceGolemActive do
             character = player.Character or player.CharacterAdded:Wait()
             
+            -- Stage 1: If Ice Golem is alive, wait for it to die completely before starting anew
             if isMobSpawned("Ice Golem") then
                 iceButton.Text = "Ice Golem: Waiting..."
                 while isMobSpawned("Ice Golem") and iceGolemActive do
@@ -173,18 +172,29 @@ local function startIceGolemLoop()
                 iceButton.Text = "Ice Golem: ON"
             end
             
+            -- Stage 2: Loop Crystals 1 through 5
             if activation then
                 for i = 1, 5 do
                     if not iceGolemActive or isMobSpawned("Ice Golem") then break end
-                    
                     local crystal = activation:FindFirstChild("Normal_IceCrystal" .. i)
                     if crystal then
                         instantTpAndInteract(crystal, 4, "IceLoopRunning")
                     end
                 end
+                
+                -- Stage 3: Teleport to IceWall and spam interact until it despawns
+                local iceWall = activation:FindFirstChild("IceWall")
+                if iceWall and iceGolemActive and not isMobSpawned("Ice Golem") then
+                    iceButton.Text = "Ice Golem: IceWall Phase"
+                    -- Keep staying at the wall while it physically exists in Workspace
+                    while iceWall and iceWall.Parent == activation and iceGolemActive and not isMobSpawned("Ice Golem") do
+                        instantTpAndInteract(iceWall, 0.5, "IceLoopRunning")
+                        task.wait()
+                    end
+                    iceButton.Text = "Ice Golem: ON"
+                end
             else
-                -- Fallback alert on button text if setup path is missing completely
-                iceButton.Text = "Path Error! Check Workspace"
+                iceButton.Text = "Path Error!"
                 task.wait(1)
             end
             task.wait()
@@ -209,7 +219,7 @@ iceButton.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================================
--- AETHERSTONE GOLEM LOOP
+-- AETHERSTONE GOLEM LOOP (With Shard Farming Intercept)
 -- ============================================================================
 local function startAetherstoneLoop()
     _G.AetherLoopRunning = true
@@ -228,15 +238,29 @@ local function startAetherstoneLoop()
         while aetherstoneActive do
             character = player.Character or player.CharacterAdded:Wait()
             
+            -- Stage 1: Boss Waiting Room with Intercept Loop for Golem Shards
             if isMobSpawned("Aetherstone Golem") then
-                aetherButton.Text = "Aetherstone: Waiting..."
+                aetherButton.Text = "Aetherstone: Active"
                 while isMobSpawned("Aetherstone Golem") and aetherstoneActive do
-                    task.wait(0.5)
+                    -- Check if any Golem Shards have spawned in the enemy area
+                    local shards = findTargetsInEnemies("Golem Shard")
+                    if #shards > 0 then
+                        aetherButton.Text = "Farming Shards..."
+                        for _, shard in ipairs(shards) do
+                            if shard and shard.Parent and aetherstoneActive then
+                                -- TP to shard for 2 seconds
+                                instantTpAndInteract(shard, 2, "AetherLoopRunning")
+                            end
+                        end
+                        aetherButton.Text = "Aetherstone: Active"
+                    end
+                    task.wait(0.3) -- Check pace optimized for mobile performance
                 end
                 if not aetherstoneActive then break end
                 aetherButton.Text = "Aetherstone: ON"
             end
             
+            -- Stage 2: Rune activation cycle
             if specialEvents then
                 for _, runeName in ipairs(runesOrder) do
                     if not aetherstoneActive or isMobSpawned("Aetherstone Golem") then break end
