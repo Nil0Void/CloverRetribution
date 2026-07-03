@@ -1,0 +1,247 @@
+-- Services (Cached locally for performance)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+
+-- State Flags
+local iceGolemActive = false
+local aetherstoneActive = false
+
+-- Create Mobile ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "GolemManagerUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Main Draggable Frame
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 180, 0, 110)
+frame.Position = UDim2.new(0.1, 0, 0.3, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true 
+frame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.Parent = frame
+
+-- Ice Golem Button
+local iceButton = Instance.new("TextButton")
+iceButton.Size = UDim2.new(0, 160, 0, 40)
+iceButton.Position = UDim2.new(0, 10, 0, 10)
+iceButton.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+iceButton.Text = "Ice Golem: OFF"
+iceButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+iceButton.Font = Enum.Font.SourceSansBold
+iceButton.TextSize = 14
+iceButton.Parent = frame
+
+local iceCorner = Instance.new("UICorner")
+iceCorner.CornerRadius = UDim.new(0, 6)
+iceCorner.Parent = iceButton
+
+-- Aetherstone Golem Button
+local aetherButton = Instance.new("TextButton")
+aetherButton.Size = UDim2.new(0, 160, 0, 40)
+aetherButton.Position = UDim2.new(0, 10, 0, 60)
+aetherButton.BackgroundColor3 = Color3.fromRGB(70, 50, 50)
+aetherButton.Text = "Aetherstone: OFF"
+aetherButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+aetherButton.Font = Enum.Font.SourceSansBold
+aetherButton.TextSize = 14
+aetherButton.Parent = frame
+
+local aetherCorner = Instance.new("UICorner")
+aetherCorner.CornerRadius = UDim.new(0, 6)
+aetherCorner.Parent = aetherButton
+
+local function updateButtonVisual(button, isActive, activeColor, inactiveColor, textPrefix)
+    button.BackgroundColor3 = isActive and activeColor or inactiveColor
+    button.Text = textPrefix .. (isActive and ": ON" or ": OFF")
+end
+
+-- Faster checking helper for mobs
+local function isMobSpawned(mobName)
+    local entities = Workspace:FindFirstChild("Entities")
+    local enemies = entities and entities:FindFirstChild("Enemies")
+    if enemies then
+        for _, enemy in ipairs(enemies:GetChildren()) do
+            if string.find(enemy.Name, mobName) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- INSTANT SPAM Teleport and Interact Routine
+local function instantTpAndInteract(targetPart, duration, loopFlagCheck)
+    local startTime = os.clock()
+    
+    -- Cache target elements to prevent looking them up millions of times a second
+    local prompts = {}
+    local clickDetectors = {}
+    for _, obj in ipairs(targetPart:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then
+            table.insert(prompts, obj)
+        elseif obj:IsA("ClickDetector") then
+            table.insert(clickDetectors, obj)
+        end
+    end
+
+    while os.clock() - startTime < duration do
+        -- Instant safety exit checks
+        if not _G[loopFlagCheck] or isMobSpawned("Golem") then break end
+        
+        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            rootPart.CFrame = targetPart.CFrame
+        end
+        
+        -- Instantaneous ProximityPrompt Trigger
+        for i = 1, #prompts do
+            local prompt = prompts[i]
+            prompt:InputHoldBegin()
+            prompt:InputHoldEnd() -- Fires the interaction instantly without a sleep delay
+        end
+        
+        -- Instantaneous ClickDetector Trigger (Executor environment dependent)
+        for i = 1, #clickDetectors do
+            if fireclickdetector then
+                fireclickdetector(clickDetectors[i])
+            end
+        end
+        
+        task.wait() -- Safely yields to the next engine frame so the mobile CPU doesn't crash
+    end
+end
+
+-- ============================================================================
+-- ICE GOLEM LOOP
+-- ============================================================================
+local function startIceGolemLoop()
+    _G.IceLoopRunning = true
+    task.spawn(function()
+        local map = Workspace:FindFirstChild("Map")
+        local zone = map and map:FindFirstChild("IceGolemZone")
+        local activation = zone and zone:FindFirstChild("Activation")
+
+        while iceGolemActive do
+            character = player.Character or player.CharacterAdded:Wait()
+            
+            if isMobSpawned("Ice Golem") then
+                iceButton.Text = "Ice Golem: Waiting..."
+                while isMobSpawned("Ice Golem") and iceGolemActive do
+                    task.wait(0.5)
+                end
+                if not iceGolemActive then break end
+                iceButton.Text = "Ice Golem: ON"
+            end
+            
+            if activation then
+                for i = 1, 5 do
+                    if not iceGolemActive or isMobSpawned("Ice Golem") then break end
+                    local crystal = activation:FindFirstChild("Normal_IceCrystal" .. i)
+                    if crystal and crystal:IsA("BasePart") then
+                        instantTpAndInteract(crystal, 4, "IceLoopRunning")
+                    end
+                end
+            else
+                task.wait(1)
+            end
+            task.wait()
+        end
+        _G.IceLoopRunning = false
+    end)
+end
+
+iceButton.MouseButton1Click:Connect(function()
+    iceGolemActive = not iceGolemActive
+    if iceGolemActive then 
+        aetherstoneActive = false 
+        _G.AetherLoopRunning = false
+        updateButtonVisual(aetherButton, false, Color3.fromRGB(0, 180, 0), Color3.fromRGB(70, 50, 50), "Aetherstone")
+    end
+    
+    updateButtonVisual(iceButton, iceGolemActive, Color3.fromRGB(0, 120, 255), Color3.fromRGB(50, 50, 70), "Ice Golem")
+    
+    if iceGolemActive then
+        startIceGolemLoop()
+    end
+end)
+
+-- ============================================================================
+-- AETHERSTONE GOLEM LOOP
+-- ============================================================================
+local function startAetherstoneLoop()
+    _G.AetherLoopRunning = true
+    task.spawn(function()
+        local entities = Workspace:FindFirstChild("Entities")
+        local interactions = entities and entities:FindFirstChild("Interactions")
+        local specialEvents = interactions and interactions:FindFirstChild("SpecialEvents")
+
+        -- Explicit list of the exact runes you requested
+        local runesOrder = {
+            "Rune of Colossal Wrath",
+            "Rune of Endless Challenge",
+            "Rune of Raging Tempest",
+            "Rune of Shattered Earth"
+        }
+
+        while aetherstoneActive do
+            character = player.Character or player.CharacterAdded:Wait()
+            
+            if isMobSpawned("Aetherstone Golem") then
+                aetherButton.Text = "Aetherstone: Waiting..."
+                while isMobSpawned("Aetherstone Golem") and aetherstoneActive do
+                    task.wait(0.5)
+                end
+                if not aetherstoneActive then break end
+                aetherButton.Text = "Aetherstone: ON"
+            end
+            
+            if specialEvents then
+                for _, runeName in ipairs(runesOrder) do
+                    if not aetherstoneActive or isMobSpawned("Aetherstone Golem") then break end
+                    
+                    local rune = specialEvents:FindFirstChild(runeName)
+                    if rune and (rune:IsA("BasePart") or rune:FindFirstChildWhichIsA("BasePart")) then
+                        -- Handle instances where the rune folder has a primary part or is a part itself
+                        local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart")
+                        if targetPart then
+                            instantTpAndInteract(targetPart, 4, "AetherLoopRunning")
+                        end
+                    end
+                end
+            else
+                task.wait(1)
+            end
+            task.wait()
+        end
+        _G.AetherLoopRunning = false
+    end)
+end
+
+aetherButton.MouseButton1Click:Connect(function()
+    aetherstoneActive = not aetherstoneActive
+    if aetherstoneActive then 
+        iceGolemActive = false 
+        _G.IceLoopRunning = false
+        updateButtonVisual(iceButton, false, Color3.fromRGB(0, 120, 255), Color3.fromRGB(50, 50, 70), "Ice Golem")
+    end
+    
+    updateButtonVisual(aetherButton, aetherstoneActive, Color3.fromRGB(0, 180, 0), Color3.fromRGB(70, 50, 50), "Aetherstone")
+    
+    if aetherstoneActive then
+        startAetherstoneLoop()
+    end
+end)
+
+-- Character Tracking Safe Catch
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+end)
