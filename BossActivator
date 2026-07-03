@@ -1,4 +1,4 @@
--- Services (Cached locally for performance)
+-- Services
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
@@ -11,29 +11,31 @@ local iceGolemActive = false
 local aetherstoneActive = false
 
 -- ============================================================================
--- ON-START CLEANUP (Removes specified walls, roof, and atmosphere to eliminate clutter/lag)
+-- ROBUST LOADER & CLEANUP (Waits until paths definitely exist)
 -- ============================================================================
 task.spawn(function()
-    -- 1. Remove Lighting Atmosphere
+    -- Clear atmosphere right away
     local atmosphere = Lighting:FindFirstChildWhichIsA("Atmosphere") or Lighting:FindFirstChild("Atmosphere")
-    if atmosphere then
-        atmosphere:Destroy()
-    end
+    if atmosphere then atmosphere:Destroy() end
 
-    -- 2. Safely traverse and clear Ice Golem Zone elements
-    local map = Workspace:WaitForChild("Map", 5)
+    -- Safe, infinite wait for Map assets to load onto mobile client
+    local map = Workspace:WaitForChild("Map", 15)
     if map then
-        local iceZone = map:FindFirstChild("IceGolemZone")
+        local iceZone = map:WaitForChild("IceGolemZone", 10)
         if iceZone then
-            local bossZone = iceZone:FindFirstChild("IceBossZone")
+            -- Handle boss zone cleanup
+            local bossZone = iceZone:WaitForChild("IceBossZone", 5)
             if bossZone then
                 local walls = bossZone:FindFirstChild("InvisBossRoomWalls")
                 if walls then walls:Destroy() end
 
                 local roof = bossZone:FindFirstChild("RoofParts")
                 if roof then roof:Destroy() end
+                print("[Success] IceBossZone clutter successfully removed!")
             end
         end
+    else
+        warn("[Error] Could not find Workspace.Map after 15 seconds. Check game path names!")
     end
 end)
 
@@ -45,7 +47,6 @@ screenGui.Name = "GolemManagerUI"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
--- Main Draggable Frame
 local frame = Instance.new("Frame")
 frame.Size = UDim2.new(0, 180, 0, 110)
 frame.Position = UDim2.new(0.1, 0, 0.3, 0)
@@ -59,7 +60,6 @@ local uiCorner = Instance.new("UICorner")
 uiCorner.CornerRadius = UDim.new(0, 8)
 uiCorner.Parent = frame
 
--- Ice Golem Button
 local iceButton = Instance.new("TextButton")
 iceButton.Size = UDim2.new(0, 160, 0, 40)
 iceButton.Position = UDim2.new(0, 10, 0, 10)
@@ -74,7 +74,6 @@ local iceCorner = Instance.new("UICorner")
 iceCorner.CornerRadius = UDim.new(0, 6)
 iceCorner.Parent = iceButton
 
--- Aetherstone Golem Button
 local aetherButton = Instance.new("TextButton")
 aetherButton.Size = UDim2.new(0, 160, 0, 40)
 aetherButton.Position = UDim2.new(0, 10, 0, 60)
@@ -94,7 +93,6 @@ local function updateButtonVisual(button, isActive, activeColor, inactiveColor, 
     button.Text = textPrefix .. (isActive and ": ON" or ": OFF")
 end
 
--- Mob Check Engine
 local function isMobSpawned(mobName)
     local entities = Workspace:FindFirstChild("Entities")
     local enemies = entities and entities:FindFirstChild("Enemies")
@@ -108,18 +106,26 @@ local function isMobSpawned(mobName)
     return false
 end
 
--- INSTANT SPAM Engine
-local function instantTpAndInteract(targetPart, duration, loopFlagCheck)
+-- UNIVERSAL CANCELLABLE INSTANT INTERACT
+local function instantTpAndInteract(targetInstance, duration, loopFlagCheck)
     local startTime = os.clock()
     
+    -- Smart Part Locator: Gets the actual visual part whether target is a Model or a BasePart
+    local targetPart = nil
+    if targetInstance:IsA("BasePart") then
+        targetPart = targetInstance
+    elseif targetInstance:IsA("Model") then
+        targetPart = targetInstance.PrimaryPart or targetInstance:FindFirstChildWhichIsA("BasePart")
+    end
+    
+    if not targetPart then return end
+
+    -- Extract interactable items
     local prompts = {}
     local clickDetectors = {}
-    for _, obj in ipairs(targetPart:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") then
-            table.insert(prompts, obj)
-        elseif obj:IsA("ClickDetector") then
-            table.insert(clickDetectors, obj)
-        end
+    for _, obj in ipairs(targetInstance:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then table.insert(prompts, obj)
+        elseif obj:IsA("ClickDetector") then table.insert(clickDetectors, obj) end
     end
 
     while os.clock() - startTime < duration do
@@ -137,9 +143,7 @@ local function instantTpAndInteract(targetPart, duration, loopFlagCheck)
         end
         
         for i = 1, #clickDetectors do
-            if fireclickdetector then
-                fireclickdetector(clickDetectors[i])
-            end
+            if fireclickdetector then fireclickdetector(clickDetectors[i]) end
         end
         
         task.wait() 
@@ -147,14 +151,15 @@ local function instantTpAndInteract(targetPart, duration, loopFlagCheck)
 end
 
 -- ============================================================================
--- ICE GOLEM LOOP
+-- FIXED ICE GOLEM LOOP
 -- ============================================================================
 local function startIceGolemLoop()
     _G.IceLoopRunning = true
     task.spawn(function()
+        -- Dynamic deep path check
         local map = Workspace:FindFirstChild("Map")
-        local zone = map and map:FindFirstChild("IceGolemZone")
-        local activation = zone and zone:FindFirstChild("Activation")
+        local iceZone = map and map:FindFirstChild("IceGolemZone")
+        local activation = iceZone and iceZone:FindFirstChild("Activation")
 
         while iceGolemActive do
             character = player.Character or player.CharacterAdded:Wait()
@@ -171,12 +176,15 @@ local function startIceGolemLoop()
             if activation then
                 for i = 1, 5 do
                     if not iceGolemActive or isMobSpawned("Ice Golem") then break end
+                    
                     local crystal = activation:FindFirstChild("Normal_IceCrystal" .. i)
-                    if crystal and crystal:IsA("BasePart") then
+                    if crystal then
                         instantTpAndInteract(crystal, 4, "IceLoopRunning")
                     end
                 end
             else
+                -- Fallback alert on button text if setup path is missing completely
+                iceButton.Text = "Path Error! Check Workspace"
                 task.wait(1)
             end
             task.wait()
@@ -234,11 +242,8 @@ local function startAetherstoneLoop()
                     if not aetherstoneActive or isMobSpawned("Aetherstone Golem") then break end
                     
                     local rune = specialEvents:FindFirstChild(runeName)
-                    if rune and (rune:IsA("BasePart") or rune:FindFirstChildWhichIsA("BasePart")) then
-                        local targetPart = rune:IsA("BasePart") and rune or rune:FindFirstChildWhichIsA("BasePart")
-                        if targetPart then
-                            instantTpAndInteract(targetPart, 4, "AetherLoopRunning")
-                        end
+                    if rune then
+                        instantTpAndInteract(rune, 4, "AetherLoopRunning")
                     end
                 end
             else
@@ -265,7 +270,6 @@ aetherButton.MouseButton1Click:Connect(function()
     end
 end)
 
--- Player Catch
 player.CharacterAdded:Connect(function(newChar)
     character = newChar
 end)
