@@ -1,0 +1,189 @@
+-- Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local TextChatService = game:GetService("TextChatService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- Global State
+local Settings = {
+    Enabled = false,
+    WebhookURL = "",
+    CheckInterval = 1, -- Seconds between workspace scans
+}
+
+-- Executor Compatibility Check for HTTP Requests
+local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
+
+-- Send Discord Notification
+local function sendDiscordWebhook(messageText)
+    if Settings.WebhookURL == "" or not httpRequest then return end
+    
+    local payload = HttpService:JSONEncode({
+        content = "@everyone 🚨 **Roblox Event Alert**",
+        embeds = {{
+            title = "In-Game Event Triggered!",
+            description = messageText,
+            color = 16711680, -- Red
+            footer = { text = "Wisp Farmer Bot • " .. os.date("%X") }
+        }}
+    })
+    
+    task.spawn(function()
+        pcall(function()
+            httpRequest({
+                Url = Settings.WebhookURL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = payload
+            })
+        end)
+    end)
+end
+
+-- Monitor In-Game Chat
+local function setupChatListener()
+    -- Modern TextChatService (Default for modern games)
+    TextChatService.OnIncomingMessage = function(message)
+        if message.Text and string.find(message.Text, "%[Event%] Something feels off%.%.%.") then
+            sendDiscordWebhook(message.Text)
+        end
+    end
+
+    -- Legacy Chat Fallback
+    local chatEvents = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+    if chatEvents then
+        local onMessage = chatEvents:FindFirstChild("OnMessageDoneFiltering")
+        if onMessage and onMessage:IsA("RemoteEvent") then
+            onMessage.OnClientEvent:Connect(function(messageData)
+                local msg = messageData.Message or ""
+                if string.find(msg, "%[Event%] Something feels off%.%.%.") then
+                    sendDiscordWebhook(msg)
+                end
+            end)
+        end
+    end
+end
+setupChatListener()
+
+-- Interaction Helper (Spams Proximity Prompts & Key Interactivity)
+local function interactWithTarget(target)
+    for _, prompt in ipairs(target:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") then
+            if fireproximityprompt then
+                fireproximityprompt(prompt)
+            else
+                prompt:InputHoldBegin()
+                task.wait(prompt.HoldDuration)
+                prompt:InputHoldEnd()
+            end
+        end
+    end
+    -- Keypress emulation (E Key)
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+end
+
+-- Teleport & Claim Loop
+local function scanAndFarm()
+    while Settings.Enabled do
+        local character = LocalPlayer.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        
+        if hrp then
+            -- Search Workspace for any model/part ending or containing "Wisp"
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if string.find(string.lower(obj.Name), "wisp") and (obj:IsA("BasePart") or obj:IsA("Model")) then
+                    local targetPart = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")) or obj
+                    
+                    if targetPart then
+                        -- Spam Teleport & Interact until destroyed
+                        while Settings.Enabled and obj:IsDescendantOf(Workspace) do
+                            hrp.CFrame = targetPart.CFrame * CFrame.new(0, 2, 0)
+                            interactWithTarget(obj)
+                            task.wait(0.05)
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(Settings.CheckInterval)
+    end
+end
+
+-- GUI Setup (Mobile Friendly)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MobileWispGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = (gethui and gethui()) or game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 180)
+MainFrame.Position = UDim2.new(0.5, -130, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true -- Mobile dragging support
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner", MainFrame)
+UICorner.CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 35)
+Title.BackgroundTransparency = 1
+Title.Text = "Wisp Auto-Farmer"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
+Title.Parent = MainFrame
+
+-- Toggle Button
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0.9, 0, 0, 45)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.25, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+ToggleBtn.Text = "Status: OFF"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Font = Enum.Font.SourceSansBold
+ToggleBtn.TextSize = 16
+ToggleBtn.Parent = MainFrame
+
+local BtnCorner = Instance.new("UICorner", ToggleBtn)
+BtnCorner.CornerRadius = UDim.new(0, 8)
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    Settings.Enabled = not Settings.Enabled
+    if Settings.Enabled then
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 100)
+        ToggleBtn.Text = "Status: RUNNING"
+        task.spawn(scanAndFarm)
+    else
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        ToggleBtn.Text = "Status: OFF"
+    end
+end)
+
+-- Discord Webhook Input Box
+local WebhookBox = Instance.new("TextBox")
+WebhookBox.Size = UDim2.new(0.9, 0, 0, 40)
+WebhookBox.Position = UDim2.new(0.05, 0, 0.60, 0)
+WebhookBox.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+WebhookBox.PlaceholderText = "Paste Discord Webhook URL..."
+WebhookBox.Text = ""
+WebhookBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+WebhookBox.ClearTextOnFocus = false
+WebhookBox.Font = Enum.Font.SourceSans
+WebhookBox.TextSize = 12
+WebhookBox.Parent = MainFrame
+
+local BoxCorner = Instance.new("UICorner", WebhookBox)
+BoxCorner.CornerRadius = UDim.new(0, 8)
+
+WebhookBox:GetPropertyChangedSignal("Text"):Connect(function()
+    Settings.WebhookURL = WebhookBox.Text
+end)
