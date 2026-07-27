@@ -3,6 +3,8 @@ local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
+local TextChatService = game:GetService("TextChatService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 local FILE_NAME = "MasterOrbitalConfig.json"
@@ -16,6 +18,10 @@ local WEAPON_ACTIVE = false
 local SPELL_ACTIVE = false
 local WALK_ACTIVE = false
 local SPAWN_TP_ACTIVE = false
+local WISP_ACTIVE = false
+
+-- Webhook & Settings
+local WEBHOOK_URL = ""
 
 -- Physics & Positioning State
 local currentOffset = Vector3.new(0, 5, 15)
@@ -26,7 +32,7 @@ local flyAnchor = nil
 local phaseStartTime = os.clock()
 local characterResetTriggered = false
 local MOVE_DURATION = 10 -- Adjust walk time before stalling
-local RESET_TIME = 20    -- Time at which character resets (e.g. 3s stall)
+local RESET_TIME = 20    -- Time at which character resets
 
 -- Chest Memory Cache
 local activeChestsCache = {}
@@ -56,24 +62,28 @@ local targets = {
     }
 }
 
--- Mobility Spawns Dictionary mapping names to workspace.Entities.Spawns entries
+-- Mobility Spawns Dictionary
 local spawnMapping = {
     ["Yeti"] = "YettiSpawn1", ["Vampire Soldier"] = "VampireSoldierSpawn", ["Stone Guardian"] = "StoneGuardian1",
     ["Shadow Hand Goon"] = "ShadowHandSpawn1", ["Seasoned Mercenary"] = "SeasonedMercenarySpawn",
     ["Pumpkin"] = "Pumpkins", ["Wolf"] = "WolfSpawn", ["Lowly Goblin"] = "LowlyGoblinn",
     ["Werewolf Soldier"] = "WerewolfSoldierSpawn", ["Bandit"] = "Bandit2Spawn", ["Desert Claw"] = "DesertClaw1",
     ["Lesser Devil Juggernaut"] = "LesserDevilSpawn", ["Wind Monk"] = "WindMageSpawn",
-    -- Boss Spawns
     ["Vennum"] = "VennumSpawn", ["Alpha Wolf"] = "AlphaWolfSpawn", ["Kraken"] = "Desert Kraken"
 }
 
+-- Executor Compatibility Check for HTTP Requests
+local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
+
+-- Persistence Handlers
 local function saveConfig()
     if not writefile then return end
     pcall(function()
         writefile(FILE_NAME, HttpService:JSONEncode({
             FARMING_ACTIVE = FARMING_ACTIVE, CHEST_ACTIVE = CHEST_ACTIVE, DRAGONBALL_ACTIVE = DRAGONBALL_ACTIVE,
             FLOWER_ACTIVE = FLOWER_ACTIVE, WEAPON_ACTIVE = WEAPON_ACTIVE, SPELL_ACTIVE = SPELL_ACTIVE,
-            WALK_ACTIVE = WALK_ACTIVE, SPAWN_TP_ACTIVE = SPAWN_TP_ACTIVE,
+            WALK_ACTIVE = WALK_ACTIVE, SPAWN_TP_ACTIVE = SPAWN_TP_ACTIVE, WISP_ACTIVE = WISP_ACTIVE,
+            WEBHOOK_URL = WEBHOOK_URL,
             currentOffset = {currentOffset.X, currentOffset.Y, currentOffset.Z}, targets = targets
         }))
     end)
@@ -82,12 +92,18 @@ end
 local function loadConfig()
     pcall(function()
         if readfile and isfile and isfile(FILE_NAME) then
-            local data = HttpService:JSONDecode(readfile(FILE_NAME))
+            local data = HttpService:JSONEncode(readfile(FILE_NAME))
             if data then
-                FARMING_ACTIVE = data.FARMING_ACTIVE or false CHEST_ACTIVE = data.CHEST_ACTIVE or false
-                DRAGONBALL_ACTIVE = data.DRAGONBALL_ACTIVE or false FLOWER_ACTIVE = data.FLOWER_ACTIVE or false
-                WEAPON_ACTIVE = data.WEAPON_ACTIVE or false SPELL_ACTIVE = data.SPELL_ACTIVE or false
-                WALK_ACTIVE = data.WALK_ACTIVE or false SPAWN_TP_ACTIVE = data.SPAWNav_ACTIVE or false
+                FARMING_ACTIVE = data.FARMING_ACTIVE or false
+                CHEST_ACTIVE = data.CHEST_ACTIVE or false
+                DRAGONBALL_ACTIVE = data.DRAGONBALL_ACTIVE or false
+                FLOWER_ACTIVE = data.FLOWER_ACTIVE or false
+                WEAPON_ACTIVE = data.WEAPON_ACTIVE or false
+                SPELL_ACTIVE = data.SPELL_ACTIVE or false
+                WALK_ACTIVE = data.WALK_ACTIVE or false
+                SPAWN_TP_ACTIVE = data.SPAWN_TP_ACTIVE or false
+                WISP_ACTIVE = data.WISP_ACTIVE or false
+                WEBHOOK_URL = data.WEBHOOK_URL or ""
                 if data.currentOffset then currentOffset = Vector3.new(data.currentOffset[1], data.currentOffset[2], data.currentOffset[3]) end
                 if data.targets then
                     if data.targets.Mobs then for k, v in pairs(data.targets.Mobs) do if targets.Mobs[k] then targets.Mobs[k] = tostring(v) end end end
@@ -99,18 +115,107 @@ local function loadConfig()
 end
 loadConfig()
 
+-- Discord Webhook Sender
+local function sendDiscordWebhook(messageText)
+    if WEBHOOK_URL == "" or not httpRequest then return end
+    
+    local payload = HttpService:JSONEncode({
+        content = "@everyone 🚨 **Roblox Event Alert**",
+        embeds = {{
+            title = "In-Game Event Triggered!",
+            description = messageText,
+            color = 16711680,
+            footer = { text = "Master Orbital Bot • " .. os.date("%X") }
+        }}
+    })
+    
+    task.spawn(function()
+        pcall(function()
+            httpRequest({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = payload
+            })
+        end)
+    end)
+end
+
+-- Chat Event Listener
+local function setupChatListener()
+    TextChatService.OnIncomingMessage = function(message)
+        if message.Text and string.find(message.Text, "%[Event%] Something feels off%.%.%.") then
+            sendDiscordWebhook(message.Text)
+        end
+    end
+
+    local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+    if chatEvents then
+        local onMessage = chatEvents:FindFirstChild("OnMessageDoneFiltering")
+        if onMessage and onMessage:IsA("RemoteEvent") then
+            onMessage.OnClientEvent:Connect(function(messageData)
+                local msg = messageData.Message or ""
+                if string.find(msg, "%[Event%] Something feels off%.%.%.") then
+                    sendDiscordWebhook(msg)
+                end
+            end)
+        end
+    end
+end
+setupChatListener()
+
+-- Universal Interaction Utility
+local function interactWithTarget(target)
+    for _, prompt in ipairs(target:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") then
+            if fireproximityprompt then
+                fireproximityprompt(prompt)
+            else
+                prompt:InputHoldBegin()
+                task.wait(prompt.HoldDuration)
+                prompt:InputHoldEnd()
+            end
+        end
+    end
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+end
+
+-- Wisp Priority Target Utilities
+local function isWispTarget(obj)
+    if not (obj:IsA("BasePart") or obj:IsA("Model")) then return false end
+    local lowerName = string.lower(obj.Name)
+    return string.sub(lowerName, -4) == "wisp" or string.find(lowerName, "wisp") ~= nil
+end
+
+local function getActiveWisp()
+    if not WISP_ACTIVE then return nil, nil end
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if isWispTarget(obj) then
+            local targetPart = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)) or obj
+            if targetPart then
+                return obj, targetPart
+            end
+        end
+    end
+    return nil, nil
+end
+
+-- Main UI Setup
 local gui = Instance.new("ScreenGui")
 gui.Name = "MasterOrbitalFarmingGui"
 gui.ResetOnSpawn = false
-gui.Parent = player:WaitForChild("PlayerGui")
+gui.Parent = (gethui and gethui()) or game:GetService("CoreGui") or player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 440, 0, 680) -- Height bumped to fit all automation features
-frame.Position = UDim2.new(0.5, -220, 0.5, -340)
+frame.Size = UDim2.new(0, 440, 0, 750)
+frame.Position = UDim2.new(0.5, -220, 0.5, -375)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 2
 frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
 frame.Active = true
+frame.ClipsDescendants = true
 frame.Parent = gui
 
 local titleLabel = Instance.new("TextLabel")
@@ -122,7 +227,6 @@ titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.TextSize = 16
 titleLabel.Parent = frame
 
--- Button Generator Utility
 local function quickButton(text, size, pos, callback)
     local btn = Instance.new("TextButton")
     btn.Size = size
@@ -135,17 +239,43 @@ local function quickButton(text, size, pos, callback)
     return btn
 end
 
--- Top Rows Controls
-local toggleBtn, chestBtn, dbBtn, flowerBtn, weaponBtn, spellBtn, walkBtn, spawnBtn
+-- Top Control Grid
+local toggleBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 10, 0, 45), function() FARMING_ACTIVE = not FARMING_ACTIVE saveConfig() end)
+local chestBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 225, 0, 45), function() CHEST_ACTIVE = not CHEST_ACTIVE saveConfig() end)
+local dbBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 10, 0, 80), function() DRAGONBALL_ACTIVE = not DRAGONBALL_ACTIVE saveConfig() end)
+local flowerBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 225, 0, 80), function() FLOWER_ACTIVE = not FLOWER_ACTIVE saveConfig() end)
+local weaponBtn = quickButton("", UDim2.new(0, 133, 0, 30), UDim2.new(0, 10, 0, 115), function() WEAPON_ACTIVE = not WEAPON_ACTIVE saveConfig() end)
+local spellBtn = quickButton("", UDim2.new(0, 133, 0, 30), UDim2.new(0, 150, 0, 115), function() SPELL_ACTIVE = not SPELL_ACTIVE saveConfig() end)
+local walkBtn = quickButton("", UDim2.new(0, 134, 0, 30), UDim2.new(0, 296, 0, 115), function() WALK_ACTIVE = not WALK_ACTIVE saveConfig() end)
+local spawnBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 10, 0, 150), function() SPAWN_TP_ACTIVE = not SPAWN_TP_ACTIVE saveConfig() end)
+local wispBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 225, 0, 150), function() WISP_ACTIVE = not WISP_ACTIVE saveConfig() end)
 
-toggleBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 10, 0, 45), function() FARMING_ACTIVE = not FARMING_ACTIVE saveConfig() end)
-chestBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 225, 0, 45), function() CHEST_ACTIVE = not CHEST_ACTIVE saveConfig() end)
-dbBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 10, 0, 80), function() DRAGONBALL_ACTIVE = not DRAGONBALL_ACTIVE saveConfig() end)
-flowerBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 225, 0, 80), function() FLOWER_ACTIVE = not FLOWER_ACTIVE saveConfig() end)
-weaponBtn = quickButton("", UDim2.new(0, 133, 0, 30), UDim2.new(0, 10, 0, 115), function() WEAPON_ACTIVE = not WEAPON_ACTIVE saveConfig() end)
-spellBtn = quickButton("", UDim2.new(0, 133, 0, 30), UDim2.new(0, 150, 0, 115), function() SPELL_ACTIVE = not SPELL_ACTIVE saveConfig() end)
-walkBtn = quickButton("", UDim2.new(0, 134, 0, 30), UDim2.new(0, 296, 0, 115), function() WALK_ACTIVE = not WALK_ACTIVE saveConfig() end)
-spawnBtn = quickButton("", UDim2.new(0, 420, 0, 30), UDim2.new(0, 10, 0, 150), function() SPAWN_TP_ACTIVE = not SPAWN_TP_ACTIVE saveConfig() end)
+-- Webhook Input & Clear Button
+local webhookBox = Instance.new("TextBox")
+webhookBox.Size = UDim2.new(0, 335, 0, 30)
+webhookBox.Position = UDim2.new(0, 10, 0, 185)
+webhookBox.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+webhookBox.PlaceholderText = "Paste Discord Webhook URL..."
+webhookBox.Text = WEBHOOK_URL
+webhookBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+webhookBox.ClearTextOnFocus = false
+webhookBox.Font = Enum.Font.SourceSans
+webhookBox.TextSize = 12
+webhookBox.ClipsDescendants = true
+webhookBox.TextTruncate = Enum.TextTruncate.AtEnd
+webhookBox.Parent = frame
+
+local clearWebhookBtn = quickButton("❌ Clear", UDim2.new(0, 80, 0, 30), UDim2.new(0, 350, 0, 185), function()
+    WEBHOOK_URL = ""
+    webhookBox.Text = ""
+    saveConfig()
+end)
+clearWebhookBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+
+webhookBox:GetPropertyChangedSignal("Text"):Connect(function()
+    WEBHOOK_URL = webhookBox.Text
+    saveConfig()
+end)
 
 local function updateUIStates()
     toggleBtn.Text = FARMING_ACTIVE and "Farm: ON" or "Farm: OFF"
@@ -156,14 +286,16 @@ local function updateUIStates()
     dbBtn.BackgroundColor3 = DRAGONBALL_ACTIVE and Color3.fromRGB(168, 126, 42) or Color3.fromRGB(55, 55, 55)
     flowerBtn.Text = "🌸 Flower TP: " .. (FLOWER_ACTIVE and "ON" or "OFF")
     flowerBtn.BackgroundColor3 = FLOWER_ACTIVE and Color3.fromRGB(140, 80, 140) or Color3.fromRGB(55, 55, 55)
-    weaponBtn.Text = "⚔️ Auto Equip: " .. (WEAPON_ACTIVE and "ON" or "OFF")
+    weaponBtn.Text = "⚔️ Equip: " .. (WEAPON_ACTIVE and "ON" or "OFF")
     weaponBtn.BackgroundColor3 = WEAPON_ACTIVE and Color3.fromRGB(56, 92, 145) or Color3.fromRGB(55, 55, 55)
-    spellBtn.Text = "🔮 Auto Spell: " .. (SPELL_ACTIVE and "ON" or "OFF")
+    spellBtn.Text = "🔮 Spell: " .. (SPELL_ACTIVE and "ON" or "OFF")
     spellBtn.BackgroundColor3 = SPELL_ACTIVE and Color3.fromRGB(56, 92, 145) or Color3.fromRGB(55, 55, 55)
-    walkBtn.Text = "🏃 Auto Walk: " .. (WALK_ACTIVE and "ON" or "OFF")
+    walkBtn.Text = "🏃 Walk: " .. (WALK_ACTIVE and "ON" or "OFF")
     walkBtn.BackgroundColor3 = WALK_ACTIVE and Color3.fromRGB(180, 90, 40) or Color3.fromRGB(55, 55, 55)
-    spawnBtn.Text = "📍 Spawn Proximity Vicinity TP: " .. (SPAWN_TP_ACTIVE and "ON" or "OFF")
+    spawnBtn.Text = "📍 Spawn TP: " .. (SPAWN_TP_ACTIVE and "ON" or "OFF")
     spawnBtn.BackgroundColor3 = SPAWN_TP_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    wispBtn.Text = "👻 Wisp Farm: " .. (WISP_ACTIVE and "ON" or "OFF")
+    wispBtn.BackgroundColor3 = WISP_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
 end
 
 RunService.Heartbeat:Connect(updateUIStates)
@@ -171,7 +303,7 @@ RunService.Heartbeat:Connect(updateUIStates)
 local function createCategoryScroll(titleText, xOffset, targetSubTable)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(0, 205, 0, 220)
-    container.Position = UDim2.new(0, xOffset, 0, 190) -- Pushed down smoothly
+    container.Position = UDim2.new(0, xOffset, 0, 225)
     container.BackgroundTransparency = 1
     container.Parent = frame
 
@@ -281,35 +413,24 @@ local function createSlider(axisName, minVal, maxVal, defaultStartVal, yOffset)
     UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then activeDragging = false end end)
 end
 
-createSlider("🔄 Orbit Position", -180, 180, 0, 430)
-createSlider("📐 Height", -20, 30, 5, 490)
-createSlider("📏 Distance", 0, 50, 15, 550)
+createSlider("🔄 Orbit Position", -180, 180, 0, 465)
+createSlider("📐 Height", -20, 30, 5, 525)
+createSlider("📏 Distance", 0, 50, 15, 585)
 
 local dragging, dragStart, startPos = false, nil, nil
 frame.InputBegan:Connect(function(input) if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and input.Position.Y - frame.AbsolutePosition.Y <= 35 then dragging, dragStart, startPos = true, input.Position, frame.Position end end)
 UIS.InputChanged:Connect(function(input) if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then local delta = input.Position - dragStart frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
 UIS.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
 
--- ============================================================================
--- OPTIMIZED, MEMORY-SAFE TARGET DETECTION MECHANICS
--- ============================================================================
-
--- Tracked Chest Memory & Active Object Collections
-local activeChestsCache = {}
-local chestVisitTimers = {}
-local chestVisitCounts = {}
-local currentChestIndex = nil
-
--- Real-time folder hook listens for chest spawns instantly (Cleaned Memory Leak)
+-- Chest Memory & Events Monitoring
 local function monitorWorkspaceEvents()
     local entities = workspace:FindFirstChild("Entities")
     local eventsFolder = entities and entities:FindFirstChild("Events")
     if not eventsFolder then return end
     
-    -- Periodic Garbage Collection of memory cache arrays to prevent RAM inflation
     task.spawn(function()
         while true do
-            task.wait(30) -- Run a deep clean cycle every 30 seconds
+            task.wait(30)
             for i = #activeChestsCache, 1, -1 do
                 local item = activeChestsCache[i]
                 if not item or not item.Parent then
@@ -323,7 +444,6 @@ local function monitorWorkspaceEvents()
 
     eventsFolder.DescendantAdded:Connect(function(descendant) 
         if descendant:IsA("Model") and descendant.Name == "Chest" then 
-            -- Avoid duplicate references
             if not table.find(activeChestsCache, descendant) then
                 table.insert(activeChestsCache, descendant) 
             end
@@ -338,17 +458,12 @@ local function monitorWorkspaceEvents()
 end
 task.spawn(monitorWorkspaceEvents)
 
--- Helper function to fetch the next valid chest in our cycling queue
 local function getActiveEventChestPrompt()
     if not CHEST_ACTIVE then return nil end
-
     local validChests = {}
     
-    -- Parse active live cache cleanly
     for i = #activeChestsCache, 1, -1 do
         local item = activeChestsCache[i]
-        
-        -- Instantly purge invalid game items from memory
         if not item or not item.Parent then
             chestVisitTimers[item] = nil 
             chestVisitCounts[item] = nil
@@ -356,12 +471,10 @@ local function getActiveEventChestPrompt()
             continue
         end
 
-        -- HARD CAP OVERRIDE: Skip if 2 rounds are completed
         if chestVisitCounts[item] and chestVisitCounts[item] >= 2 then
             continue
         end
 
-        -- Credit Tracker Verification Layer
         local creditedFolder = item:FindFirstChild("Credited")
         if creditedFolder then
             local isMyChest = false
@@ -382,12 +495,8 @@ local function getActiveEventChestPrompt()
         end
     end
 
-    if #validChests == 0 then
-        currentChestIndex = nil
-        return nil
-    end
+    if #validChests == 0 then currentChestIndex = nil return nil end
 
-    -- Verify if our active selection is still within its 3-second loop window
     if currentChestIndex and currentChestIndex <= #validChests then
         local activeSelection = validChests[currentChestIndex]
         local startTime = chestVisitTimers[activeSelection.model]
@@ -400,24 +509,16 @@ local function getActiveEventChestPrompt()
         end
     end
 
-    -- Cycle to the next available chest index carousel point
-    local nextIndex = 1
-    if currentChestIndex then
-        nextIndex = (currentChestIndex % #validChests) + 1
-    end
-
+    local nextIndex = currentChestIndex and ((currentChestIndex % #validChests) + 1) or 1
     local loopsChecked = 0
     while loopsChecked < #validChests do
         local checkSelection = validChests[nextIndex]
-        if not chestVisitCounts[checkSelection.model] or chestVisitCounts[checkSelection.model] < 2 then
-            break 
-        end
+        if not chestVisitCounts[checkSelection.model] or chestVisitCounts[checkSelection.model] < 2 then break end
         nextIndex = (nextIndex % #validChests) + 1
         loopsChecked = loopsChecked + 1
     end
 
     local finalSelection = validChests[nextIndex]
-    
     if chestVisitCounts[finalSelection.model] and chestVisitCounts[finalSelection.model] >= 2 then
         currentChestIndex = nil
         return nil
@@ -425,10 +526,8 @@ local function getActiveEventChestPrompt()
 
     currentChestIndex = nextIndex
     chestVisitTimers[finalSelection.model] = os.clock() 
-
     return finalSelection.prompt, finalSelection.model, finalSelection.part
 end
-
 
 local function getActiveDragonBall()
     if not DRAGONBALL_ACTIVE then return nil end
@@ -450,7 +549,6 @@ local function getActiveFarmTarget()
     if not folder then currentTarget = nil return nil end
     local list = folder:GetChildren()
 
-    -- Layer 1: Priority
     for _, m in ipairs(list) do
         if m:FindFirstChild("HumanoidRootPart") and m:FindFirstChildOfClass("Humanoid") and m:FindFirstChildOfClass("Humanoid").Health > 0 then
             local low = m.Name:lower()
@@ -458,19 +556,16 @@ local function getActiveFarmTarget()
             for k, v in pairs(targets.Mobs) do if v == "PRIORITY" and low:find(k:lower(), 1, true) then currentTarget = m return m end end
         end
     end
-    -- Layer 2: Regular Bosses
     for _, m in ipairs(list) do
         if m:FindFirstChild("HumanoidRootPart") and m:FindFirstChildOfClass("Humanoid") and m:FindFirstChildOfClass("Humanoid").Health > 0 then
             local low = m.Name:lower()
             for k, v in pairs(targets.Bosses) do if v == "ON" and low:find(k:lower(), 1, true) then currentTarget = m return m end end
         end
     end
-    -- Layer 3: Sticky Mobs Check
     if currentTarget and currentTarget.Parent == folder and currentTarget:FindFirstChild("HumanoidRootPart") and currentTarget:FindFirstChildOfClass("Humanoid") and currentTarget:FindFirstChildOfClass("Humanoid").Health > 0 then
         local low = currentTarget.Name:lower()
         for k, v in pairs(targets.Mobs) do if v == "ON" and low:find(k:lower(), 1, true) then return currentTarget end end
     end
-    -- Layer 4: Standard Mobs
     currentTarget = nil
     for _, m in ipairs(list) do
         if m:FindFirstChild("HumanoidRootPart") and m:FindFirstChildOfClass("Humanoid") and m:FindFirstChildOfClass("Humanoid").Health > 0 then
@@ -481,7 +576,7 @@ local function getActiveFarmTarget()
     return nil
 end
 
--- Combined High-Priority Vector Mechanics Engine
+-- Render Loop Engine
 RunService.RenderStepped:Connect(function()
     local character = player.Character
     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
@@ -489,7 +584,26 @@ RunService.RenderStepped:Connect(function()
     
     if not myRoot or (myHum and myHum.Health <= 0) then if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end return end
 
-    -- INTEGRATED WALK CYCLE LOGIC (Independent of early returns, works during farming)
+    -- Top Priority 1: Wisp System
+    local wispObj, wispPart = getActiveWisp()
+    if wispObj and wispPart then
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+        myRoot.CFrame = wispPart.CFrame * CFrame.new(0, 1.5, 0)
+        interactWithTarget(wispObj)
+        return
+    end
+
+    -- Top Priority 2: Dragon Ball System
+    local dbModel, dbPart, dbPrompt = getActiveDragonBall()
+    if dbModel and dbPart and dbPrompt then return end
+
+    -- Optional Walk Loop Logic
     if WALK_ACTIVE and myHum and myHum.Health > 0 then
         local elapsed = os.clock() - phaseStartTime
         if elapsed < MOVE_DURATION then
@@ -507,20 +621,11 @@ RunService.RenderStepped:Connect(function()
         characterResetTriggered = false
     end
 
-    ---------------------------------------------------------------------------------
-    -- POSITIONING OVERRIDE LAYER 1: Dragon Ball Engine Hard lock
-    ---------------------------------------------------------------------------------
-    local dbModel, dbPart, dbPrompt = getActiveDragonBall()
-    if dbModel and dbPart and dbPrompt then return end
-
-    ---------------------------------------------------------------------------------
-    -- POSITIONING OVERRIDE LAYER 2: Flower TP Loop Hold
-    ---------------------------------------------------------------------------------
     if FLOWER_ACTIVE then return end
 
     if not FARMING_ACTIVE then if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end currentTarget = nil return end
 
-    -- CHEST QUEUE OVERRIDE LATCH
+    -- Priority 3: Event Chests
     local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
     if chestPrompt and chestModel and chestMiddlePart then
         if not flyAnchor or flyAnchor.Parent ~= myRoot then
@@ -534,7 +639,7 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
-    -- Standard Combat Targeting Logic
+    -- Priority 4: Enemy Farming
     local currentEnemy = getActiveFarmTarget()
     if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
         local enemyRoot = currentEnemy.HumanoidRootPart
@@ -551,15 +656,11 @@ RunService.RenderStepped:Connect(function()
         local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(0, orbitY, orbitZ)).Position
         myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
     else
-        -----------------------------------------------------------------------------
-        -- POSITIONING OVERRIDE LAYER 3: Spawn Vicinity TP (Runs when no mob exists)
-        -----------------------------------------------------------------------------
         if SPAWN_TP_ACTIVE then
             local spawnsFolder = workspace:FindFirstChild("Entities")
             spawnsFolder = spawnsFolder and spawnsFolder:FindFirstChild("Spawns")
             if spawnsFolder then
                 local selectedSpawnPart = nil
-                -- First try to find a Priority Spawn name match
                 for k, v in pairs(targets.Bosses) do
                     if v == "PRIORITY" and spawnMapping[k] and spawnsFolder:FindFirstChild(spawnMapping[k]) then
                         selectedSpawnPart = spawnsFolder[spawnMapping[k]] break
@@ -572,7 +673,6 @@ RunService.RenderStepped:Connect(function()
                         end
                     end
                 end
-                -- Fallback to standard active mob settings
                 if not selectedSpawnPart then
                     for k, v in pairs(targets.Bosses) do
                         if v == "ON" and spawnMapping[k] and spawnsFolder:FindFirstChild(spawnMapping[k]) then
@@ -601,37 +701,27 @@ RunService.RenderStepped:Connect(function()
                 end
             end
         end
-        
         if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
     end
 end)
 
--- ============================================================================
--- FLOWER HARVESTING SUB-ENGINE THREAD
--- ============================================================================
--- Custom variables required by this thread (Place these in your variables section)
-local FLOWER_DELAY = 1.5 -- Duration to spend harvesting each flower before moving on
+-- Flower Harvesting Sub-Engine
+local FLOWER_DELAY = 1.5
 
 local function getActiveFlowerTarget()
-    if not FLOWER_ACTIVE then return nil, nil end
-    
+    if not FLOWER_ACTIVE or getActiveWisp() ~= nil then return nil, nil end
     local folder = workspace:FindFirstChild("Entities")
     folder = folder and folder:FindFirstChild("Interactions")
     folder = folder and folder:FindFirstChild("Collectibles")
     folder = folder and folder:FindFirstChild("Flowers")
-    
     if not folder then return nil, nil end
 
     local flowers = {}
-    -- Safely scan for all operational prompts inside the collectibles folder
     for _, v in ipairs(folder:GetDescendants()) do
         local prompt = v:FindFirstChildOfClass("ProximityPrompt") or v:FindFirstChild("ProximityPrompt", true)
-        if prompt then 
-            table.insert(flowers, v) 
-        end
+        if prompt then table.insert(flowers, v) end
     end
 
-    -- Sort Lily types first, then sort alphabetically by asset name
     table.sort(flowers, function(a, b)
         local aLily = a.Name:lower():find("lily") ~= nil
         local bLily = b.Name:lower():find("lily") ~= nil
@@ -639,36 +729,23 @@ local function getActiveFlowerTarget()
         return a.Name < b.Name
     end)
 
-    -- Extract valid visual parts and operational prompt components
     for _, flower in ipairs(flowers) do
-        local part = flower:IsA("BasePart") and flower 
-            or flower:FindFirstChild("Handle") 
-            or flower:FindFirstChildWhichIsA("BasePart", true)
-            
-        local prompt = flower:FindFirstChildOfClass("ProximityPrompt") 
-            or flower:FindFirstChild("ProximityPrompt", true)
-
-        if part and prompt and prompt.Parent then
-            return part, prompt
-        end
+        local part = flower:IsA("BasePart") and flower or flower:FindFirstChild("Handle") or flower:FindFirstChildWhichIsA("BasePart", true)
+        local prompt = flower:FindFirstChildOfClass("ProximityPrompt") or flower:FindFirstChild("ProximityPrompt", true)
+        if part and prompt and prompt.Parent then return part, prompt end
     end
-    
     return nil, nil
 end
 
--- Dedicated high-speed background execution thread for handling flower cycles
 task.spawn(function()
     while true do
-        if FLOWER_ACTIVE then
+        if FLOWER_ACTIVE and not getActiveWisp() then
             pcall(function()
                 local flowerPart, flowerPrompt = getActiveFlowerTarget()
-
                 if flowerPart and flowerPrompt then
                     local character = player.Character
                     local myRoot = character and character:FindFirstChild("HumanoidRootPart")
-
                     if myRoot then
-                        -- Instantly establish body velocity anchor to guarantee stable teleport positions
                         if not flyAnchor or flyAnchor.Parent ~= myRoot then
                             if flyAnchor then flyAnchor:Destroy() end
                             flyAnchor = Instance.new("BodyVelocity")
@@ -677,318 +754,12 @@ task.spawn(function()
                             flyAnchor.Velocity = Vector3.new(0, 0, 0)
                             flyAnchor.Parent = myRoot
                         end
-
-                        -- Lock directly above target item
-                        myRoot.CFrame = flowerPart.CFrame + Vector3.new(0, 3, 0)
-                        
-                        -- High-frequency burst cycle loop until the completion delay expires
-                        local startTime = os.clock()
-                        while FLOWER_ACTIVE and (os.clock() - startTime) < FLOWER_DELAY do
-                            if flowerPrompt and flowerPrompt.Parent then 
-                                fireproximityprompt(flowerPrompt) 
-                            else
-                                break -- Break early if item vanishes mid-harvest
-                            end
-                            task.wait(0.05) -- Fast fire rate pacing
-                        end
+                        myRoot.CFrame = flowerPart.CFrame * CFrame.new(0, 2, 0)
+                        interactWithTarget(flowerPart)
                     end
-                else
-                    -- No more flowers found: throttle script performance load
-                    task.wait(0.5)
                 end
             end)
-        else
-            -- Thread sleeping state when deactivated
-            task.wait(0.5)
         end
+        task.wait(FLOWER_DELAY)
     end
 end)
-
--- Uncapped Frame-Rate Synced Interaction Engine
-task.spawn(function()
-    while true do
-        RunService.Heartbeat:Wait()
-        
-        -- LAYER 1 INTERACTION OVERRIDE: Rapidly latch to Dragon Ball if present
-        if DRAGONBALL_ACTIVE then
-            local dbModel, dbPart, dbPrompt = getActiveDragonBall()
-            if dbModel and dbPart and dbPrompt then
-                local character = player.Character
-                local myRoot = character and character:FindFirstChild("HumanoidRootPart")
-                if myRoot then
-                    if not flyAnchor or flyAnchor.Parent ~= myRoot then
-                        if flyAnchor then flyAnchor:Destroy() end
-                        flyAnchor = Instance.new("BodyVelocity")
-                        flyAnchor.Name = "AntiDriftAnchor"
-                        flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                        flyAnchor.Velocity = Vector3.new(0, 0, 0)
-                        flyAnchor.Parent = myRoot
-                    end
-                    myRoot.CFrame = dbPart.CFrame
-                    pcall(function() fireproximityprompt(dbPrompt) end)
-                end
-                continue -- Bypass lower priority loops to optimize throughput
-            end
-        end
-
-        -- LAYER 2 INTERACTION OVERRIDE: Flower Teleport & Harvest Loop
-        if FLOWER_ACTIVE then
-            local flowerPart, flowerPrompt = getActiveFlowerTarget()
-            if flowerPart and flowerPrompt then
-                local character = player.Character
-                local myRoot = character and character:FindFirstChild("HumanoidRootPart")
-                if myRoot then
-                    if not flyAnchor or flyAnchor.Parent ~= myRoot then
-                        if flyAnchor then flyAnchor:Destroy() end
-                        flyAnchor = Instance.new("BodyVelocity")
-                        flyAnchor.Name = "AntiDriftAnchor"
-                        flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                        flyAnchor.Velocity = Vector3.new(0, 0, 0)
-                        flyAnchor.Parent = myRoot
-                    end
-                    myRoot.CFrame = flowerPart.CFrame + Vector3.new(0, 3, 0)
-                    pcall(function() fireproximityprompt(flowerPrompt) end)
-                end
-                continue -- Bypass lower loops while focused on flower gathering
-            end
-        end
-
-        -- LAYER 3 INTERACTION: Standard Chest Prompt Interaction
-        if FARMING_ACTIVE and CHEST_ACTIVE then
-            local chestPrompt, chestModel = getActiveEventChestPrompt()
-            if chestPrompt and chestModel then
-                pcall(function() fireproximityprompt(chestPrompt) end)
-            end
-        end
-    end
-end)
-
--- Helper function to universally find your character inside workspace.Entities
-local function getEntitiesCharacter()
-    local entitiesFolder = workspace:FindFirstChild("Entities")
-    if not entitiesFolder then return nil end
-    
-    -- Track by matching your standard character name reference to the Entities child name
-    local standardChar = player.Character
-    if standardChar and entitiesFolder:FindFirstChild(standardChar.Name) then
-        return entitiesFolder[standardChar.Name]
-    end
-    
-    -- Fallback: Scan the folder for any model matching the game's "AiPlayer_" naming schema
-    for _, child in ipairs(entitiesFolder:GetChildren()) do
-        if child:IsA("Model") and string.find(child.Name, "^AiPlayer_") then
-            -- Double check via Humanoid presence to ensure it's a valid character entity
-            if child:FindFirstChildOfClass("Humanoid") then
-                return child
-            end
-        end
-    end
-    return nil
-end
-
-task.spawn(function()
-    -- Safely locate the remote folder using your exact path structure
-    local replicatedPackage = game:GetService("ReplicatedStorage"):WaitForChild("ReplicatedPackage", 5)
-    local remotesFolder = replicatedPackage and replicatedPackage:WaitForChild("Remotes", 5)
-    local actionRemote = remotesFolder and remotesFolder:WaitForChild("action", 5)
-    
-    if not actionRemote then
-        warn("Auto-Equip Critical Error: Action remote path not found!")
-        return
-    end
-
-    while true do
-        task.wait(0.5) -- Pacing check loop interval
-        
-        pcall(function()
-            local myEntity = getEntitiesCharacter()
-            local humanoid = myEntity and myEntity:FindFirstChildOfClass("Humanoid")
-            
-            -- Guard Clause: Do nothing if your entity character is missing or dead
-            if not myEntity or not humanoid or humanoid.Health <= 0 then return end
-            
-            -- ----------------------------------------------------------------
-            -- 1. SMART WEAPON & BOOK TOGGLE LOCK
-            -- ----------------------------------------------------------------
-            if WEAPON_ACTIVE then
-                local weaponModel = myEntity:FindFirstChild("Weapon")
-                local grimoireModel = myEntity:FindFirstChild("Grimoire")
-                local beltGrimoireModel = myEntity:FindFirstChild("BeltGrimoire")
-                
-                -- Only fire if the "Weapon" model is completely missing from your entity layout
-                if not weaponModel then
-                    actionRemote:FireServer("EquipWeapon")
-                    task.wait(0.2) -- Small cushion delay to let replication register before checking book
-                end
-                
-                -- Only fire if BeltGrimoire exists (unequipped state) AND Grimoire is missing (equipped state)
-                if beltGrimoireModel and not grimoireModel then
-                    actionRemote:FireServer("Book")
-                    task.wait(0.1)
-                end
-            end
-
-            -- ----------------------------------------------------------------
-            -- 2. INTEGRATED SPELL INVENTORY MOUNT HANDLER
-            -- ----------------------------------------------------------------
-            if SPELL_ACTIVE then
-                local backpack = player:FindFirstChild("Backpack")
-                if backpack then
-                    for _, tool in ipairs(backpack:GetChildren()) do
-                        -- Pull spell tools from inventory instantly into the workspace.Entities character model
-                        if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
-                            tool.Parent = myEntity
-                            task.wait(0.1) -- Small cushion delay for smooth item mounting state transitions
-                        end
-                    end
-                end
-            end
-        end)
-    end
-end)
--- Integrated Fly, Orbit, Spawn Proximity, and Auto-Walk Cycle Loop
-RunService.RenderStepped:Connect(function()
-    local character = player.Character
-    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
-    local myHum = character and character:FindFirstChildOfClass("Humanoid")
-    
-    if not myRoot or (myHum and myHum.Health <= 0) then 
-        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end 
-        return 
-    end
-
-    -------------------------------------------------------------------------------------
-    -- PRIORITY 1: Dragon Ball Teleport Latch (Bypasses everything)
-    -------------------------------------------------------------------------------------
-    local dbModel, dbPart, dbPrompt = getActiveDragonBall()
-    if dbModel and dbPart and dbPrompt then return end
-
-    -------------------------------------------------------------------------------------
-    -- PRIORITY 2: Flower Teleport Latch (Bypasses regular farm)
-    -------------------------------------------------------------------------------------
-    if FLOWER_ACTIVE then
-        local flowerPart, flowerPrompt = getActiveFlowerTarget()
-        if flowerPart and flowerPrompt then return end
-    end
-
-    -------------------------------------------------------------------------------------
-    -- PRIORITY 3: Auto-Walk Reset Timer Tracking (Independent Clock Engine)
-    -------------------------------------------------------------------------------------
-    if WALK_ACTIVE then
-        local elapsed = os.clock() - phaseStartTime
-        if elapsed >= 30 then -- Hit the 30-second cap limit
-            if not characterResetTriggered then
-                characterResetTriggered = true
-                myHum.Health = 0 -- Trigger pristine character reset
-            end
-            return
-        end
-    else
-        characterResetTriggered = false
-    end
-
-    -------------------------------------------------------------------------------------
-    -- PRIORITY 4: Combat State Assessment Loop
-    -------------------------------------------------------------------------------------
-    if not FARMING_ACTIVE then 
-        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end 
-        currentTarget = nil 
-        
-        -- Fallback: If Master Farm is OFF but Auto-Walk is ON, move forward normally
-        if WALK_ACTIVE and os.clock() - phaseStartTime < 25 then
-            myHum:Move(myRoot.CFrame.LookVector, false)
-        end
-        return 
-    end
-
-    -- Priority 4a: Chest Queue Latches
-    local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
-    if chestPrompt and chestModel and chestMiddlePart then
-        if not flyAnchor or flyAnchor.Parent ~= myRoot then
-            if flyAnchor then flyAnchor:Destroy() end
-            flyAnchor = Instance.new("BodyVelocity")
-            flyAnchor.Name = "AntiDriftAnchor"
-            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            flyAnchor.Velocity = Vector3.new(0, 0, 0)
-            flyAnchor.Parent = myRoot
-        end
-        myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 2, 0)
-        return
-    end
-
-    -- Priority 4b: Active Combat Target Acquisition
-    local currentEnemy = getActiveFarmTarget()
-    
-    if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
-        -- Enemy exists! Engage vertical tracking orbit physics
-        local enemyRoot = currentEnemy.HumanoidRootPart
-        if not flyAnchor or flyAnchor.Parent ~= myRoot then
-            if flyAnchor then flyAnchor:Destroy() end
-            flyAnchor = Instance.new("BodyVelocity")
-            flyAnchor.Name = "AntiDriftAnchor"
-            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-            flyAnchor.Velocity = Vector3.new(0, 0, 0)
-            flyAnchor.Parent = myRoot
-        end
-        
-        local angleRad = math.rad(currentOffset.X) 
-        local radiusDistance = currentOffset.Z
-        local staticHeightAdjust = currentOffset.Y
-        local orbitY = math.sin(angleRad) * radiusDistance + staticHeightAdjust
-        local orbitZ = math.cos(angleRad) * radiusDistance
-        local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(0, orbitY, orbitZ)).Position
-        myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
-        
-        -- Integrated Request Execution: Feed walking input simultaneously without breaking orbit focus
-        if WALK_ACTIVE and os.clock() - phaseStartTime < 25 then
-            myHum:Move(myRoot.CFrame.LookVector, false)
-        end
-        
-    else
-        -- No active mob detected! Attempt to wake up target zone via Spawns Folder Teleportation
-        local fallbackSpawnPart = getActiveSpawnZoneFallback()
-        
-        if fallbackSpawnPart then
-            if not flyAnchor or flyAnchor.Parent ~= myRoot then
-                if flyAnchor then flyAnchor:Destroy() end
-                flyAnchor = Instance.new("BodyVelocity")
-                flyAnchor.Name = "AntiDriftAnchor"
-                flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-                flyAnchor.Velocity = Vector3.new(0, 0, 0)
-                flyAnchor.Parent = myRoot
-            end
-            
-            -- Keep player securely locked 15 studs directly above the spawn center point
-            myRoot.CFrame = fallbackSpawnPart.CFrame * CFrame.new(0, 15, 0)
-            
-            -- Maintain walking updates at spawn pads so serverside detection stays hot
-            if WALK_ACTIVE and os.clock() - phaseStartTime < 25 then
-                myHum:Move(myRoot.CFrame.LookVector, false)
-            end
-        else
-            -- Absolute Fallback: Safe idle floating
-            if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
-            if WALK_ACTIVE and os.clock() - phaseStartTime < 25 then
-                myHum:Move(myRoot.CFrame.LookVector, false)
-            end
-        end
-    end
-end)
-
--- Clock Watchdog Listener for Instant Clean Respawn Recovery
-player.CharacterAdded:Connect(function()
-    phaseStartTime = os.clock()
-    characterResetTriggered = false
-end)
-
--- Anti-AFK Engine Module
-local VirtualUser = game:GetService("VirtualUser")
-player.Idled:Connect(function()
-    pcall(function()
-        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-        task.wait(1)
-        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-    end)
-end)
-
-print("Master Priority Orbital Attacher V2 Suite Successfully Initialized!")
