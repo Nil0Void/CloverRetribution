@@ -8,12 +8,30 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Global State
+-- Global State & File Config
+local ConfigFile = "WispFarmer_Webhook.txt"
 local Settings = {
     Enabled = false,
     WebhookURL = "",
-    CheckInterval = 1, -- Seconds between workspace scans
+    CheckInterval = 1,
 }
+
+-- Load Saved Webhook URL on startup
+if readfile and isfile and isfile(ConfigFile) then
+    pcall(function()
+        Settings.WebhookURL = readfile(ConfigFile)
+    end)
+end
+
+-- Save Webhook URL Helper
+local function saveWebhook(url)
+    Settings.WebhookURL = url
+    if writefile then
+        pcall(function()
+            writefile(ConfigFile, url)
+        end)
+    end
+end
 
 -- Executor Compatibility Check for HTTP Requests
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
@@ -46,7 +64,7 @@ end
 
 -- Monitor In-Game Chat
 local function setupChatListener()
-    -- Modern TextChatService (Default for modern games)
+    -- Modern TextChatService
     TextChatService.OnIncomingMessage = function(message)
         if message.Text and string.find(message.Text, "%[Event%] Something feels off%.%.%.") then
             sendDiscordWebhook(message.Text)
@@ -69,7 +87,7 @@ local function setupChatListener()
 end
 setupChatListener()
 
--- Interaction Helper (Spams Proximity Prompts & Key Interactivity)
+-- Interaction Helper (Spams Proximity Prompts & E Key)
 local function interactWithTarget(target)
     for _, prompt in ipairs(target:GetDescendants()) do
         if prompt:IsA("ProximityPrompt") then
@@ -84,8 +102,14 @@ local function interactWithTarget(target)
     end
     -- Keypress emulation (E Key)
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-    task.wait(0.05)
+    task.wait(0.03)
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+end
+
+-- Check if Object ends with or contains "Wisp" (e.g. BloodWisp, ManaWisp)
+local function isWispTarget(objName)
+    local lowerName = string.lower(objName)
+    return string.sub(lowerName, -4) == "wisp" or string.find(lowerName, "wisp") ~= nil
 end
 
 -- Teleport & Claim Loop
@@ -95,17 +119,15 @@ local function scanAndFarm()
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
         
         if hrp then
-            -- Search Workspace for any model/part ending or containing "Wisp"
             for _, obj in ipairs(Workspace:GetDescendants()) do
-                if string.find(string.lower(obj.Name), "wisp") and (obj:IsA("BasePart") or obj:IsA("Model")) then
+                if isWispTarget(obj.Name) and (obj:IsA("BasePart") or obj:IsA("Model")) then
                     local targetPart = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")) or obj
                     
                     if targetPart then
-                        -- Spam Teleport & Interact until destroyed
                         while Settings.Enabled and obj:IsDescendantOf(Workspace) do
-                            hrp.CFrame = targetPart.CFrame * CFrame.new(0, 2, 0)
+                            hrp.CFrame = targetPart.CFrame * CFrame.new(0, 1.5, 0)
                             interactWithTarget(obj)
-                            task.wait(0.05)
+                            task.wait(0.03)
                         end
                     end
                 end
@@ -115,7 +137,7 @@ local function scanAndFarm()
     end
 end
 
--- GUI Setup (Mobile Friendly)
+-- GUI Setup (Touch Friendly)
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "MobileWispGUI"
 ScreenGui.ResetOnSpawn = false
@@ -127,7 +149,7 @@ MainFrame.Position = UDim2.new(0.5, -130, 0.3, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
-MainFrame.Draggable = true -- Mobile dragging support
+MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
 local UICorner = Instance.new("UICorner", MainFrame)
@@ -174,7 +196,7 @@ WebhookBox.Size = UDim2.new(0.9, 0, 0, 40)
 WebhookBox.Position = UDim2.new(0.05, 0, 0.60, 0)
 WebhookBox.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
 WebhookBox.PlaceholderText = "Paste Discord Webhook URL..."
-WebhookBox.Text = ""
+WebhookBox.Text = Settings.WebhookURL -- Pre-fills saved URL if found
 WebhookBox.TextColor3 = Color3.fromRGB(255, 255, 255)
 WebhookBox.ClearTextOnFocus = false
 WebhookBox.Font = Enum.Font.SourceSans
@@ -184,6 +206,7 @@ WebhookBox.Parent = MainFrame
 local BoxCorner = Instance.new("UICorner", WebhookBox)
 BoxCorner.CornerRadius = UDim.new(0, 8)
 
+-- Auto-save whenever you change or paste the URL
 WebhookBox:GetPropertyChangedSignal("Text"):Connect(function()
-    Settings.WebhookURL = WebhookBox.Text
+    saveWebhook(WebhookBox.Text)
 end)
