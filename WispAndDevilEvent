@@ -8,6 +8,229 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 
+-- Config File Setup
+local ConfigFile = "WispFarmer_Webhook.txt"
+local Settings = {
+    Enabled = false,
+    WebhookURL = "",
+    CheckInterval = 1.0, -- Lower frequency to eliminate lag
+}
+
+-- Load Saved Webhook URL
+if readfile and isfile and isfile(ConfigFile) then
+    pcall(function()
+        Settings.WebhookURL = readfile(ConfigFile)
+    end)
+end
+
+-- Save Webhook URL Helper
+local function saveWebhook(url)
+    Settings.WebhookURL = url
+    if writefile then
+        pcall(function()
+            writefile(ConfigFile, url)
+        end)
+    end
+end
+
+-- Executor HTTP Request Support
+local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
+
+-- Send Discord Notification
+local function sendDiscordWebhook(messageText)
+    if Settings.WebhookURL == "" or not httpRequest then return end
+    
+    local payload = HttpService:JSONEncode({
+        content = "@everyone 🚨 **Roblox Event Alert**",
+        embeds = {{
+            title = "In-Game Event Triggered!",
+            description = messageText,
+            color = 16711680,
+            footer = { text = "Wisp Farmer Bot • " .. os.date("%X") }
+        }}
+    })
+    
+    task.spawn(function()
+        pcall(function()
+            httpRequest({
+                Url = Settings.WebhookURL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = payload
+            })
+        end)
+    end)
+end
+
+-- Chat Event Listener
+local function setupChatListener()
+    TextChatService.OnIncomingMessage = function(message)
+        if message.Text and string.find(message.Text, "%[Event%] Something feels off%.%.%.") then
+            sendDiscordWebhook(message.Text)
+        end
+    end
+
+    local chatEvents = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+    if chatEvents then
+        local onMessage = chatEvents:FindFirstChild("OnMessageDoneFiltering")
+        if onMessage and onMessage:IsA("RemoteEvent") then
+            onMessage.OnClientEvent:Connect(function(messageData)
+                local msg = messageData.Message or ""
+                if string.find(msg, "%[Event%] Something feels off%.%.%.") then
+                    sendDiscordWebhook(msg)
+                end
+            end)
+        end
+    end
+end
+setupChatListener()
+
+-- Interaction Helper
+local function interactWithTarget(target)
+    for _, prompt in ipairs(target:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") then
+            if fireproximityprompt then
+                fireproximityprompt(prompt)
+            else
+                prompt:InputHoldBegin()
+                task.wait(prompt.HoldDuration)
+                prompt:InputHoldEnd()
+            end
+        end
+    end
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+end
+
+-- Check if Object name ends with or contains "Wisp"
+local function isWispTarget(obj)
+    if not (obj:IsA("BasePart") or obj:IsA("Model")) then return false end
+    local lowerName = string.lower(obj.Name)
+    return string.sub(lowerName, -4) == "wisp" or string.find(lowerName, "wisp") ~= nil
+end
+
+-- Process and Farm Target
+local function farmWisp(obj)
+    if not Settings.Enabled then return end
+    
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local targetPart = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")) or obj
+    if targetPart then
+        while Settings.Enabled and obj:IsDescendantOf(Workspace) do
+            hrp.CFrame = targetPart.CFrame * CFrame.new(0, 1.5, 0)
+            interactWithTarget(obj)
+            task.wait(0.05)
+        end
+    end
+end
+
+-- Auto-Farm Event Listener (Event-driven to stop lag)
+Workspace.DescendantAdded:Connect(function(descendant)
+    if Settings.Enabled and isWispTarget(descendant) then
+        task.spawn(farmWisp, descendant)
+    end
+end)
+
+-- Background Scan (Runs smoothly without freezing)
+local function scanAndFarm()
+    while Settings.Enabled do
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if isWispTarget(obj) then
+                farmWisp(obj)
+            end
+        end
+        task.wait(Settings.CheckInterval)
+    end
+end
+
+-- UI Construction
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MobileWispGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = (gethui and gethui()) or game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 280, 0, 190)
+MainFrame.Position = UDim2.new(0.5, -140, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.ClipsDescendants = true -- Prevents elements from overflowing frame
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner", MainFrame)
+UICorner.CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 35)
+Title.BackgroundTransparency = 1
+Title.Text = "Wisp Auto-Farmer"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
+Title.Parent = MainFrame
+
+-- Status Button
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0.9, 0, 0, 45)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.23, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+ToggleBtn.Text = "Status: OFF"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Font = Enum.Font.SourceSansBold
+ToggleBtn.TextSize = 16
+ToggleBtn.Parent = MainFrame
+
+local BtnCorner = Instance.new("UICorner", ToggleBtn)
+BtnCorner.CornerRadius = UDim.new(0, 8)
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    Settings.Enabled = not Settings.Enabled
+    if Settings.Enabled then
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 100)
+        ToggleBtn.Text = "Status: RUNNING"
+        task.spawn(scanAndFarm)
+    else
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        ToggleBtn.Text = "Status: OFF"
+    end
+end)
+
+-- Discord Webhook Box (Clean Text Containment)
+local WebhookBox = Instance.new("TextBox")
+WebhookBox.Size = UDim2.new(0.9, 0, 0, 42)
+WebhookBox.Position = UDim2.new(0.05, 0, 0.58, 0)
+WebhookBox.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+WebhookBox.PlaceholderText = "Paste Discord Webhook URL..."
+WebhookBox.Text = Settings.WebhookURL
+WebhookBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+WebhookBox.ClearTextOnFocus = false
+WebhookBox.Font = Enum.Font.SourceSans
+WebhookBox.TextSize = 12
+WebhookBox.ClipsDescendants = true -- Clips overflow text
+WebhookBox.TextTruncate = Enum.TextTruncate.AtEnd -- Truncates long URL clean with "..."
+WebhookBox.Parent = MainFrame
+
+local BoxCorner = Instance.new("UICorner", WebhookBox)
+BoxCorner.CornerRadius = UDim.new(0, 8)
+
+WebhookBox:GetPropertyChangedSignal("Text"):Connect(function()
+    saveWebhook(WebhookBox.Text)
+end)-- Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local TextChatService = game:GetService("TextChatService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer
+
 -- Global State & File Config
 local ConfigFile = "WispFarmer_Webhook.txt"
 local Settings = {
