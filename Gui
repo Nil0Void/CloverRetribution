@@ -20,6 +20,10 @@ local LOOP_DELAY = 50
 local MOVE_DURATION = 5
 local RESET_TIME = 10
 
+-- Kill Aura Config
+local KILL_AURA_RANGE = 30
+local DAMAGE_THRESHOLD = 0.15 -- 15% damage verification check
+
 -- UI Configuration (Unified Menu)
 local gui = Instance.new("ScreenGui")
 gui.Name = "UnifiedAutomationGui"
@@ -27,8 +31,8 @@ gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 220, 0, 300) -- Increased height slightly for 5th button
-frame.Position = UDim2.new(0.5, -110, 0.5, -150)
+frame.Size = UDim2.new(0, 220, 0, 350) -- Expanded height to fit the new toggle
+frame.Position = UDim2.new(0.5, -110, 0.5, -175)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 2
 frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
@@ -49,7 +53,7 @@ local scroll = Instance.new("ScrollingFrame")
 scroll.Size = UDim2.new(1, 0, 1, -30)
 scroll.Position = UDim2.new(0, 0, 0, 30)
 scroll.BackgroundTransparency = 1
-scroll.CanvasSize = UDim2.new(0, 0, 0, 310)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 370)
 scroll.ScrollBarThickness = 6
 scroll.Parent = frame
 
@@ -68,17 +72,18 @@ local function createButton(text, order)
     btn.Font = Enum.Font.SourceSans
     btn.TextSize = 16
     btn.LayoutOrder = order
-    btn.Text = text -- Correctly label them immediately on startup
+    btn.Text = text
     btn.Parent = scroll
     return btn
 end
 
--- Named explicitly from the beginning
+-- Feature Buttons
 local bWeapon = createButton("⚔️ Auto Equip: OFF", 1)
 local bSpell = createButton("✨ Auto Spells: OFF", 2)
 local bBall = createButton("🐉 Auto Dragon Ball: OFF", 3)
 local bFlower = createButton("🌸 Flower Farm: OFF", 4)
 local bWalk = createButton("🚶 Auto Walk Cycle: OFF", 5)
+local bKillAura = createButton("⚡ Kill Aura (Mobs/Boss): OFF", 6)
 
 -- Toggle Tracking States
 local flags = {
@@ -86,7 +91,8 @@ local flags = {
     spell = false,
     dragonBall = false,
     flower = false,
-    walk = false
+    walk = false,
+    killAura = false
 }
 
 -- Button Interactions
@@ -119,7 +125,6 @@ bWalk.MouseButton1Click:Connect(function()
     bWalk.Text = flags.walk and "🚶 Auto Walk Cycle: ON" or "🚶 Auto Walk Cycle: OFF"
     bWalk.BackgroundColor3 = flags.walk and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
     
-    -- Stop movement forces immediately if toggled off
     if not flags.walk then
         local character = player.Character
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -127,7 +132,13 @@ bWalk.MouseButton1Click:Connect(function()
     end
 end)
 
--- Bulletproof Mobile & PC Dragging Code
+bKillAura.MouseButton1Click:Connect(function()
+    flags.killAura = not flags.killAura
+    bKillAura.Text = flags.killAura and "⚡ Kill Aura (Mobs/Boss): ON" or "⚡ Kill Aura (Mobs/Boss): OFF"
+    bKillAura.BackgroundColor3 = flags.killAura and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(50, 50, 50)
+end)
+
+-- Dragging Code
 local dragging = false
 local dragStart, startPos
 
@@ -195,6 +206,14 @@ local function getEntity()
         end
     end
     return nil
+end
+
+-- Network Ownership helper
+local function hasNetworkOwnership(part)
+    local success, owner = pcall(function()
+        return part:GetNetworkOwner()
+    end)
+    return success and (owner == player)
 end
 
 -- 1 & 2. Auto Equip Weapon & Grimoire / Auto Spells Loop
@@ -346,23 +365,70 @@ RunService.RenderStepped:Connect(function()
         local elapsed = os.clock() - phaseStartTime
         
         if elapsed < MOVE_DURATION then
-            -- Phase 1: Keep pushing forward based on camera orientation
             local moveDirection = primaryPart.CFrame.LookVector
             humanoid:Move(moveDirection, false)
         elseif elapsed < RESET_TIME then
-            -- Phase 2: Stand completely still
             humanoid:Move(Vector3.new(0, 0, 0), false)
         else
-            -- Phase 3: Trigger the clean character death reset
             if not characterResetTriggered then
                 characterResetTriggered = true
                 humanoid.Health = 0
             end
         end
     else
-        -- Instantly refresh clock tracking while dead to pick up smoothly when respawning
         phaseStartTime = os.clock()
         characterResetTriggered = false
+    end
+end)
+
+-- 6. Optimized Kill Aura Loop (Categorizes Mobs vs Bosses in workspace.Entities.Enemies)
+task.spawn(function()
+    while true do
+        task.wait(0.3) -- Throttled loop to maintain 0 lag
+        if flags.killAura then
+            pcall(function()
+                local enemiesFolder = workspace:FindFirstChild("Entities")
+                enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
+                
+                local root = getRoot()
+                if not enemiesFolder or not root then return end
+
+                -- Count name occurrences to differentiate Mobs vs Bosses dynamically
+                local nameCounts = {}
+                local enemyInstances = enemiesFolder:GetChildren()
+                
+                for _, enemy in ipairs(enemyInstances) do
+                    nameCounts[enemy.Name] = (nameCounts[enemy.Name] or 0) + 1
+                end
+
+                for _, enemy in ipairs(enemyInstances) do
+                    if not flags.killAura then break end
+                    
+                    local humanoid = enemy:FindFirstChildOfClass("Humanoid")
+                    local hrp = enemy:FindFirstChild("HumanoidRootPart")
+                    
+                    if humanoid and hrp and humanoid.Health > 0 then
+                        local distance = (root.Position - hrp.Position).Magnitude
+                        if distance <= KILL_AURA_RANGE then
+                            -- Classification: 
+                            -- Boss = unique (nameCount == 1), Mob = multiple (nameCount > 1)
+                            local isBoss = (nameCounts[enemy.Name] == 1)
+                            
+                            local maxHealth = humanoid.MaxHealth
+                            local currentHealth = humanoid.Health
+                            local damageDealt = maxHealth - currentHealth
+                            local damagePercent = damageDealt / maxHealth
+
+                            -- Execute when 15% damage condition is met OR if network ownership is held, 
+                            -- OR automatically target bosses if needed based on preference
+                            if damagePercent >= DAMAGE_THRESHOLD or hasNetworkOwnership(hrp) or isBoss then
+                                humanoid.Health = 0
+                            end
+                        end
+                    end
+                end
+            end)
+        end
     end
 end)
 
@@ -370,11 +436,9 @@ end)
 local virtualUser = game:GetService("VirtualUser")
 
 player.Idled:Connect(function()
-    -- Simulates a hardware click to reset Roblox's internal 20-minute idle timer
     virtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
     task.wait(0.5)
     virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
-
-print("All features initialized with static labels. Ready!")
+print("All features initialized, including Mobs/Boss Kill Aura. Ready!")
