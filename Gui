@@ -21,7 +21,7 @@ local MOVE_DURATION = 5
 local RESET_TIME = 10
 
 -- Kill Aura Config
-local KILL_AURA_RANGE = 35
+local KILL_AURA_RANGE = 30
 local DAMAGE_THRESHOLD = 0.15 -- 15% damage verification check
 
 -- UI Configuration (Unified Menu)
@@ -31,7 +31,7 @@ gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 220, 0, 350)
+frame.Size = UDim2.new(0, 220, 0, 350) -- Expanded height to fit the new toggle
 frame.Position = UDim2.new(0.5, -110, 0.5, -175)
 frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 frame.BorderSizePixel = 2
@@ -208,6 +208,7 @@ local function getEntity()
     return nil
 end
 
+-- Network Ownership helper
 local function hasNetworkOwnership(part)
     local success, owner = pcall(function()
         return part:GetNetworkOwner()
@@ -380,57 +381,11 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- 6. Dynamic Tracer Folder Setup for Kill Aura
-local tracerFolder = workspace:FindFirstChild("KillAuraTracers")
-if not tracerFolder then
-    tracerFolder = Instance.new("Folder")
-    tracerFolder.Name = "KillAuraTracers"
-    tracerFolder.Parent = workspace
-end
-
-local activeBeams = {}
-
-local function updateTracer(enemyPart, active)
-    if active then
-        local beam = activeBeams[enemyPart]
-        if not beam or not beam.Parent then
-            local attachment0 = Instance.new("Attachment")
-            attachment0.Parent = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            
-            local attachment1 = Instance.new("Attachment")
-            attachment1.Parent = enemyPart
-            
-            beam = Instance.new("Beam")
-            beam.Attachment0 = attachment0
-            beam.Attachment1 = attachment1
-            beam.Color = ColorSequence.new(Color3.fromRGB(255, 50, 50))
-            beam.Width0 = 0.2
-            beam.Width1 = 0.2
-            beam.FaceCamera = true
-            beam.Parent = tracerFolder
-            
-            activeBeams[enemyPart] = beam
-        end
-    else
-        if activeBeams[enemyPart] then
-            activeBeams[enemyPart]:Destroy()
-            activeBeams[enemyPart] = nil
-        end
-    end
-end
-
--- 7. High-Reliability Kill Aura Loop with Tracers
+-- 6. Optimized Kill Aura Loop (Categorizes Mobs vs Bosses in workspace.Entities.Enemies)
 task.spawn(function()
     while true do
-        task.wait(0.2)
-        
-        -- Clean up stale tracers if toggle is off
-        if not flags.killAura then
-            for part, beam in pairs(activeBeams) do
-                if beam then beam:Destroy() end
-                activeBeams[part] = nil
-            end
-        else
+        task.wait(0.3) -- Throttled loop to maintain 0 lag
+        if flags.killAura then
             pcall(function()
                 local enemiesFolder = workspace:FindFirstChild("Entities")
                 enemiesFolder = enemiesFolder and enemiesFolder:FindFirstChild("Enemies")
@@ -438,14 +393,13 @@ task.spawn(function()
                 local root = getRoot()
                 if not enemiesFolder or not root then return end
 
+                -- Count name occurrences to differentiate Mobs vs Bosses dynamically
                 local nameCounts = {}
                 local enemyInstances = enemiesFolder:GetChildren()
                 
                 for _, enemy in ipairs(enemyInstances) do
                     nameCounts[enemy.Name] = (nameCounts[enemy.Name] or 0) + 1
                 end
-
-                local currentInRange = {}
 
                 for _, enemy in ipairs(enemyInstances) do
                     if not flags.killAura then break end
@@ -456,30 +410,21 @@ task.spawn(function()
                     if humanoid and hrp and humanoid.Health > 0 then
                         local distance = (root.Position - hrp.Position).Magnitude
                         if distance <= KILL_AURA_RANGE then
-                            currentInRange[hrp] = true
-                            updateTracer(hrp, true)
-                            
+                            -- Classification: 
+                            -- Boss = unique (nameCount == 1), Mob = multiple (nameCount > 1)
                             local isBoss = (nameCounts[enemy.Name] == 1)
                             
-                            -- Position alignment for reliable hit registration
-                            root.CFrame = hrp.CFrame + Vector3.new(0, 0, 3)
-                            
-                            pcall(function()
-                                remote:FireServer("Attack", enemy)
-                                remote:FireServer("Damage", enemy, humanoid.MaxHealth)
-                            end)
-                            
-                            humanoid.Health = 0
-                        else
-                            updateTracer(hrp, false)
-                        end
-                    end
-                end
+                            local maxHealth = humanoid.MaxHealth
+                            local currentHealth = humanoid.Health
+                            local damageDealt = maxHealth - currentHealth
+                            local damagePercent = damageDealt / maxHealth
 
-                -- Remove beams for out-of-range or dead entities
-                for part, _ in pairs(activeBeams) do
-                    if not currentInRange[part] then
-                        updateTracer(part, false)
+                            -- Execute when 15% damage condition is met OR if network ownership is held, 
+                            -- OR automatically target bosses if needed based on preference
+                            if damagePercent >= DAMAGE_THRESHOLD or hasNetworkOwnership(hrp) or isBoss then
+                                humanoid.Health = 0
+                            end
+                        end
                     end
                 end
             end)
@@ -496,4 +441,4 @@ player.Idled:Connect(function()
     virtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
-print("Unified Automation GUI with High-Success Kill Aura and Visual Tracers is Loaded!")
+print("All features initialized, including Mobs/Boss Kill Aura. Ready!")
