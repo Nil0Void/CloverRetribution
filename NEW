@@ -1,0 +1,992 @@
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local FILE_NAME = "MasterOrbitalConfig.json"
+
+-- ============================================================================
+-- MOBILE-TUNED CONSTANTS
+-- ============================================================================
+local INSTAKILL_RATE = 6            -- attacks/sec (was 20) — mobile safe
+local MELEE_ORBIT_DIST = 3          -- close orbit when instakilling (server range check)
+local MELEE_ORBIT_HEIGHT = 1
+local USE_PCALL = false             -- skip pcalls in hot loops for mobile speed
+
+-- Global Feature Toggles
+local FARMING_ACTIVE = false
+local CHEST_ACTIVE = false
+local DRAGONBALL_ACTIVE = false
+local FLOWER_ACTIVE = false
+local WEAPON_ACTIVE = false
+local SPELL_ACTIVE = false
+local WALK_ACTIVE = false
+local SPAWN_TP_ACTIVE = false
+local INSTAKILL_ACTIVE = false
+
+-- Physics & Positioning State
+local currentOffset = Vector3.new(0, 5, 15)
+local currentTarget = nil
+local flyAnchor = nil
+
+-- Walk Cycle Timers
+local phaseStartTime = os.clock()
+local characterResetTriggered = false
+local MOVE_DURATION = 10
+local RESET_TIME = 20
+
+-- Chest Memory Cache
+local activeChestsCache = {}
+local chestVisitTimers = {}
+local chestVisitCounts = {}
+local currentChestIndex = nil
+
+-- ============================================================================
+-- REMOTES INIT (cached, one-time lookup)
+-- ============================================================================
+local actionRemote
+task.spawn(function()
+    local pkg = ReplicatedStorage:WaitForChild("ReplicatedPackage", 15)
+    local remotes = pkg and pkg:WaitForChild("Remotes", 15)
+    actionRemote = remotes and remotes:WaitForChild("action", 15)
+    if not actionRemote then
+        warn("[Script] action remote not found — insta kill & auto-equip disabled.")
+    end
+end)
+
+-- ============================================================================
+-- TARGET MATRIX
+-- ============================================================================
+local targets = {
+    Mobs = {
+        ["Yetti"] = "OFF", ["Vampire Soldier"] = "OFF", ["Stone Guardian"] = "OFF",
+        ["Shadow Hand Goon"] = "OFF", ["Seasoned Mercenary"] = "OFF", ["Riddled Skeleton Soldier"] = "OFF",
+        ["Pumpkin"] = "OFF", ["Wolf"] = "OFF", ["Mage Apprentice"] = "OFF",
+        ["Lesser Devil Juggernaut"] = "OFF", ["Desert Claw"] = "OFF", ["Bandit"] = "OFF",
+        ["Wolf Hunter"] = "OFF", ["Wind Monk"] = "OFF", ["Lowly Goblin"] = "OFF",
+        ["Werewolf Soldier"] = "OFF"
+    },
+    Bosses = {
+        ["Vennum"] = "OFF", ["Alpha Wolf"] = "OFF", ["Warlord"] = "OFF",
+        ["Terra"] = "OFF", ["Red"] = "OFF", ["Alpha Desert Claw"] = "OFF",
+        ["Apex"] = "OFF", ["Kraken"] = "OFF", ["The Crimson Witch"] = "OFF",
+        ["Netherwing"] = "OFF", ["Khamsin"] = "OFF", ["Ice Golem"] = "OFF",
+        ["Nyxar"] = "OFF", ["Word Devil"] = "OFF", ["Devil"] = "OFF",
+        ["Medusa"] = "OFF", ["Aetherion"] = "OFF", ["Morningstar"] = "OFF",
+        ["Primal Werewolf"] = "OFF", ["Elder Vampire"] = "OFF", ["Vampire Elite"] = "OFF",
+        ["Aetherstone Golem"] = "OFF"
+    }
+}
+
+local spawnMapping = {
+    ["Yeti"] = "YettiSpawn1", ["Vampire Soldier"] = "VampireSoldierSpawn", ["Stone Guardian"] = "StoneGuardian1",
+    ["Shadow Hand Goon"] = "ShadowHandSpawn1", ["Seasoned Mercenary"] = "SeasonedMercenarySpawn",
+    ["Pumpkin"] = "Pumpkins", ["Wolf"] = "WolfSpawn", ["Lowly Goblin"] = "LowlyGoblinn",
+    ["Werewolf Soldier"] = "WerewolfSoldierSpawn", ["Bandit"] = "Bandit2Spawn", ["Desert Claw"] = "DesertClaw1",
+    ["Lesser Devil Juggernaut"] = "LesserDevilSpawn", ["Wind Monk"] = "WindMageSpawn",
+    ["Vennum"] = "VennumSpawn", ["Alpha Wolf"] = "AlphaWolfSpawn", ["Kraken"] = "Desert Kraken"
+}
+
+-- ============================================================================
+-- CONFIG SAVE/LOAD
+-- ============================================================================
+local function saveConfig()
+    if not writefile then return end
+    pcall(function()
+        writefile(FILE_NAME, HttpService:JSONEncode({
+            FARMING_ACTIVE = FARMING_ACTIVE, CHEST_ACTIVE = CHEST_ACTIVE, DRAGONBALL_ACTIVE = DRAGONBALL_ACTIVE,
+            FLOWER_ACTIVE = FLOWER_ACTIVE, WEAPON_ACTIVE = WEAPON_ACTIVE, SPELL_ACTIVE = SPELL_ACTIVE,
+            WALK_ACTIVE = WALK_ACTIVE, SPAWN_TP_ACTIVE = SPAWN_TP_ACTIVE, INSTAKILL_ACTIVE = INSTAKILL_ACTIVE,
+            currentOffset = {currentOffset.X, currentOffset.Y, currentOffset.Z}, targets = targets
+        }))
+    end)
+end
+
+local function loadConfig()
+    pcall(function()
+        if readfile and isfile and isfile(FILE_NAME) then
+            local data = HttpService:JSONDecode(readfile(FILE_NAME))
+            if data then
+                FARMING_ACTIVE = data.FARMING_ACTIVE or false
+                CHEST_ACTIVE = data.CHEST_ACTIVE or false
+                DRAGONBALL_ACTIVE = data.DRAGONBALL_ACTIVE or false
+                FLOWER_ACTIVE = data.FLOWER_ACTIVE or false
+                WEAPON_ACTIVE = data.WEAPON_ACTIVE or false
+                SPELL_ACTIVE = data.SPELL_ACTIVE or false
+                WALK_ACTIVE = data.WALK_ACTIVE or false
+                SPAWN_TP_ACTIVE = data.SPAWN_TP_ACTIVE or false
+                INSTAKILL_ACTIVE = data.INSTAKILL_ACTIVE or false
+                if data.currentOffset then
+                    currentOffset = Vector3.new(data.currentOffset[1], data.currentOffset[2], data.currentOffset[3])
+                end
+                if data.targets then
+                    if data.targets.Mobs then
+                        for k, v in pairs(data.targets.Mobs) do targets.Mobs[k] = tostring(v) end
+                    end
+                    if data.targets.Bosses then
+                        for k, v in pairs(data.targets.Bosses) do
+                            if targets.Bosses[k] then targets.Bosses[k] = tostring(v) end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+loadConfig()
+
+-- ============================================================================
+-- GUI
+-- ============================================================================
+local gui = Instance.new("ScreenGui")
+gui.Name = "MasterOrbitalFarmingGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 440, 0, 720)
+frame.Position = UDim2.new(0.5, -220, 0.5, -360)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 2
+frame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+frame.Active = true
+frame.Parent = gui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 35)
+titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+titleLabel.Text = "📐 Master Priority Orbital Suite"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 16
+titleLabel.Parent = frame
+
+local function quickButton(text, size, pos, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = size
+    btn.Position = pos
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 13
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Parent = frame
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+local toggleBtn, chestBtn, dbBtn, flowerBtn, weaponBtn, spellBtn, walkBtn, spawnBtn, instakillBtn
+
+toggleBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 10, 0, 45), function() FARMING_ACTIVE = not FARMING_ACTIVE saveConfig() end)
+chestBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 225, 0, 45), function() CHEST_ACTIVE = not CHEST_ACTIVE saveConfig() end)
+dbBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 10, 0, 80), function() DRAGONBALL_ACTIVE = not DRAGONBALL_ACTIVE saveConfig() end)
+flowerBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 225, 0, 80), function() FLOWER_ACTIVE = not FLOWER_ACTIVE saveConfig() end)
+weaponBtn = quickButton("", UDim2.new(0, 133, 0, 30), UDim2.new(0, 10, 0, 115), function() WEAPON_ACTIVE = not WEAPON_ACTIVE saveConfig() end)
+spellBtn = quickButton("", UDim2.new(0, 133, 0, 30), UDim2.new(0, 150, 0, 115), function() SPELL_ACTIVE = not SPELL_ACTIVE saveConfig() end)
+walkBtn = quickButton("", UDim2.new(0, 134, 0, 30), UDim2.new(0, 296, 0, 115), function() WALK_ACTIVE = not WALK_ACTIVE saveConfig() end)
+spawnBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 10, 0, 150), function() SPAWN_TP_ACTIVE = not SPAWN_TP_ACTIVE saveConfig() end)
+instakillBtn = quickButton("", UDim2.new(0, 205, 0, 30), UDim2.new(0, 225, 0, 150), function() INSTAKILL_ACTIVE = not INSTAKILL_ACTIVE saveConfig() end)
+
+local function updateUIStates()
+    toggleBtn.Text = FARMING_ACTIVE and "Farm: ON" or "Farm: OFF"
+    toggleBtn.BackgroundColor3 = FARMING_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    chestBtn.Text = CHEST_ACTIVE and "🎁 Chests: ON" or "🎁 Chests: OFF"
+    chestBtn.BackgroundColor3 = CHEST_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    dbBtn.Text = DRAGONBALL_ACTIVE and "🐉 Dragon Ball: ON" or "🐉 Dragon Ball: OFF"
+    dbBtn.BackgroundColor3 = DRAGONBALL_ACTIVE and Color3.fromRGB(168, 126, 42) or Color3.fromRGB(55, 55, 55)
+    flowerBtn.Text = "🌸 Flower TP: " .. (FLOWER_ACTIVE and "ON" or "OFF")
+    flowerBtn.BackgroundColor3 = FLOWER_ACTIVE and Color3.fromRGB(140, 80, 140) or Color3.fromRGB(55, 55, 55)
+    weaponBtn.Text = "⚔️ Auto Equip: " .. (WEAPON_ACTIVE and "ON" or "OFF")
+    weaponBtn.BackgroundColor3 = WEAPON_ACTIVE and Color3.fromRGB(56, 92, 145) or Color3.fromRGB(55, 55, 55)
+    spellBtn.Text = "🔮 Auto Spell: " .. (SPELL_ACTIVE and "ON" or "OFF")
+    spellBtn.BackgroundColor3 = SPELL_ACTIVE and Color3.fromRGB(56, 92, 145) or Color3.fromRGB(55, 55, 55)
+    walkBtn.Text = "🏃 Auto Walk: " .. (WALK_ACTIVE and "ON" or "OFF")
+    walkBtn.BackgroundColor3 = WALK_ACTIVE and Color3.fromRGB(180, 90, 40) or Color3.fromRGB(55, 55, 55)
+    spawnBtn.Text = "📍 Spawn TP: " .. (SPAWN_TP_ACTIVE and "ON" or "OFF")
+    spawnBtn.BackgroundColor3 = SPAWN_TP_ACTIVE and Color3.fromRGB(46, 117, 89) or Color3.fromRGB(55, 55, 55)
+    instakillBtn.Text = "💀 Insta Kill: " .. (INSTAKILL_ACTIVE and "ON" or "OFF")
+    instakillBtn.BackgroundColor3 = INSTAKILL_ACTIVE and Color3.fromRGB(180, 40, 40) or Color3.fromRGB(55, 55, 55)
+end
+
+-- Slower UI refresh on mobile (5 Hz instead of 60 Hz) — big CPU savings
+task.spawn(function()
+    while true do
+        updateUIStates()
+        task.wait(0.2)
+    end
+end)
+
+-- ============================================================================
+-- CATEGORY SCROLL (returns refs for dynamic hooking)
+-- ============================================================================
+local function createCategoryScroll(titleText, xOffset, targetSubTable)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(0, 205, 0, 220)
+    container.Position = UDim2.new(0, xOffset, 0, 190)
+    container.BackgroundTransparency = 1
+    container.Parent = frame
+
+    local catTitle = Instance.new("TextLabel")
+    catTitle.Size = UDim2.new(1, 0, 0, 20)
+    catTitle.BackgroundTransparency = 1
+    catTitle.Text = titleText
+    catTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+    catTitle.Font = Enum.Font.SourceSansBold
+    catTitle.TextSize = 14
+    catTitle.Parent = container
+
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, 0, 1, -25)
+    scroll.Position = UDim2.new(0, 0, 0, 25)
+    scroll.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+    scroll.ScrollBarThickness = 5
+    scroll.Parent = container
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 4)
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.Parent = scroll
+
+    if targetSubTable then
+        local sortedNames = {}
+        for name in pairs(targetSubTable) do table.insert(sortedNames, name) end
+        table.sort(sortedNames)
+
+        for _, mobName in ipairs(sortedNames) do
+            local mobBtn = Instance.new("TextButton")
+            mobBtn.Size = UDim2.new(0, 190, 0, 30)
+            mobBtn.Font = Enum.Font.SourceSans
+            mobBtn.TextSize = 13
+            mobBtn.Parent = scroll
+
+            local function refreshMobButtonVisuals()
+                local state = targetSubTable[mobName]
+                if state == "ON" then
+                    mobBtn.Text = mobName .. " [ON]"
+                    mobBtn.BackgroundColor3 = Color3.fromRGB(56, 92, 145)
+                elseif state == "PRIORITY" then
+                    mobBtn.Text = "⭐ " .. mobName .. " [PRIO]"
+                    mobBtn.BackgroundColor3 = Color3.fromRGB(168, 126, 42)
+                else
+                    mobBtn.Text = mobName .. " [OFF]"
+                    mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+                end
+            end
+            refreshMobButtonVisuals()
+
+            mobBtn.MouseButton1Click:Connect(function()
+                local cur = targetSubTable[mobName]
+                targetSubTable[mobName] = (cur == "OFF" and "ON") or (cur == "ON" and "PRIORITY") or "OFF"
+                currentTarget = nil
+                refreshMobButtonVisuals()
+                saveConfig()
+            end)
+        end
+    end
+
+    scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+    return scroll, layout
+end
+
+local mobsScroll, mobsLayout = createCategoryScroll("⚔️ Mobs (Live)", 10, nil)
+local enemyContainer = mobsScroll
+local enemyLayout = mobsLayout
+
+createCategoryScroll("👹 Bosses & Elites", 225, targets.Bosses)
+
+-- ============================================================================
+-- DYNAMIC ENEMY DETECTION (lag-free, event-driven)
+-- ============================================================================
+local detectedEnemies = {}
+local enemyButtons = {}
+local pendingUIUpdate = false
+
+local function scheduleUIRefresh()
+    if pendingUIUpdate then return end
+    pendingUIUpdate = true
+    task.defer(function()
+        task.wait(0.25) -- bigger debounce on mobile
+        pendingUIUpdate = false
+
+        -- Remove buttons for enemies that no longer exist
+        for enemyName, btn in pairs(enemyButtons) do
+            if not detectedEnemies[enemyName] then
+                btn:Destroy()
+                enemyButtons[enemyName] = nil
+            end
+        end
+
+        -- Add buttons for new enemies
+        for enemyName, _ in pairs(detectedEnemies) do
+            if not enemyButtons[enemyName] then
+                local mobBtn = Instance.new("TextButton")
+                mobBtn.Size = UDim2.new(0, 190, 0, 30)
+                mobBtn.Font = Enum.Font.SourceSans
+                mobBtn.TextSize = 13
+                mobBtn.Parent = enemyContainer
+
+                if not targets.Mobs[enemyName] then
+                    targets.Mobs[enemyName] = "OFF"
+                end
+
+                local function refreshVisuals()
+                    local state = targets.Mobs[enemyName]
+                    if state == "ON" then
+                        mobBtn.Text = enemyName .. " [ON]"
+                        mobBtn.BackgroundColor3 = Color3.fromRGB(56, 92, 145)
+                    elseif state == "PRIORITY" then
+                        mobBtn.Text = "⭐ " .. enemyName .. " [PRIO]"
+                        mobBtn.BackgroundColor3 = Color3.fromRGB(168, 126, 42)
+                    else
+                        mobBtn.Text = enemyName .. " [OFF]"
+                        mobBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+                    end
+                end
+                refreshVisuals()
+
+                mobBtn.MouseButton1Click:Connect(function()
+                    local cur = targets.Mobs[enemyName]
+                    targets.Mobs[enemyName] = (cur == "OFF" and "ON") or (cur == "ON" and "PRIORITY") or "OFF"
+                    currentTarget = nil
+                    refreshVisuals()
+                    saveConfig()
+                end)
+
+                enemyButtons[enemyName] = mobBtn
+            end
+        end
+
+        if enemyLayout then
+            enemyContainer.CanvasSize = UDim2.new(0, 0, 0, enemyLayout.AbsoluteContentSize.Y + 10)
+        end
+    end)
+end
+
+task.spawn(function()
+    local entities = workspace:WaitForChild("Entities", 15)
+    if not entities then return end
+    local enemiesFolder = entities:WaitForChild("Enemies", 15)
+    if not enemiesFolder then return end
+
+    local function registerEnemy(model)
+        if not model:IsA("Model") then return end
+        if not detectedEnemies[model.Name] then
+            detectedEnemies[model.Name] = true
+            scheduleUIRefresh()
+        end
+    end
+
+    local function unregisterEnemy(model)
+        if not model:IsA("Model") then return end
+        local stillExists = false
+        for _, child in ipairs(enemiesFolder:GetChildren()) do
+            if child.Name == model.Name and child ~= model then
+                stillExists = true
+                break
+            end
+        end
+        if not stillExists then
+            detectedEnemies[model.Name] = nil
+            scheduleUIRefresh()
+        end
+    end
+
+    for _, child in ipairs(enemiesFolder:GetChildren()) do registerEnemy(child) end
+    enemiesFolder.ChildAdded:Connect(registerEnemy)
+    enemiesFolder.ChildRemoved:Connect(unregisterEnemy)
+end)
+
+-- ============================================================================
+-- SLIDERS
+-- ============================================================================
+local function createSlider(axisName, minVal, maxVal, yOffset)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -20, 0, 20)
+    label.Position = UDim2.new(0, 10, 0, yOffset)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -20, 0, 8)
+    sliderBg.Position = UDim2.new(0, 10, 0, yOffset + 20)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    sliderBg.Parent = frame
+
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Size = UDim2.new(0, 16, 0, 16)
+    sliderBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+    sliderBtn.Text = ""
+    sliderBtn.Parent = sliderBg
+
+    local function refreshSliderVisuals()
+        local liveValue = (axisName == "🔄 Orbit Position" and currentOffset.X) or (axisName == "📐 Height" and currentOffset.Y) or currentOffset.Z
+        label.Text = axisName .. ": " .. tostring(liveValue) .. ((axisName:find("Orbit") and "°") or " studs")
+        sliderBtn.Position = UDim2.new((liveValue - minVal) / (maxVal - minVal), -8, 0.5, -8)
+    end
+    refreshSliderVisuals()
+
+    local activeDragging = false
+    sliderBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            activeDragging = true
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if activeDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local clmp = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+            local val = math.round(minVal + (clmp * (maxVal - minVal)))
+            if axisName == "🔄 Orbit Position" then currentOffset = Vector3.new(val, currentOffset.Y, currentOffset.Z)
+            elseif axisName == "📐 Height" then currentOffset = Vector3.new(currentOffset.X, val, currentOffset.Z)
+            else currentOffset = Vector3.new(currentOffset.X, currentOffset.Y, val) end
+            refreshSliderVisuals()
+            saveConfig()
+        end
+    end)
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            activeDragging = false
+        end
+    end)
+end
+
+createSlider("🔄 Orbit Position", -180, 180, 430)
+createSlider("📐 Height", -20, 30, 490)
+createSlider("📏 Distance", 0, 50, 550)
+
+-- Drag Frame
+local dragging, dragStart, startPos = false, nil, nil
+frame.InputBegan:Connect(function(input)
+    if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch)
+        and input.Position.Y - frame.AbsolutePosition.Y <= 35 then
+        dragging, dragStart, startPos = true, input.Position, frame.Position
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- ============================================================================
+-- CHEST SYSTEM
+-- ============================================================================
+task.spawn(function()
+    local entities = workspace:FindFirstChild("Entities")
+    local eventsFolder = entities and entities:FindFirstChild("Events")
+    if not eventsFolder then return end
+
+    task.spawn(function()
+        while true do
+            task.wait(30)
+            for i = #activeChestsCache, 1, -1 do
+                local item = activeChestsCache[i]
+                if not item or not item.Parent then
+                    chestVisitTimers[item] = nil
+                    chestVisitCounts[item] = nil
+                    table.remove(activeChestsCache, i)
+                end
+            end
+        end
+    end)
+
+    eventsFolder.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("Model") and descendant.Name == "Chest" then
+            if not table.find(activeChestsCache, descendant) then
+                table.insert(activeChestsCache, descendant)
+            end
+        end
+    end)
+
+    for _, descendant in ipairs(eventsFolder:GetDescendants()) do
+        if descendant:IsA("Model") and descendant.Name == "Chest" then
+            table.insert(activeChestsCache, descendant)
+        end
+    end
+end)
+
+local function getActiveEventChestPrompt()
+    if not CHEST_ACTIVE then return nil end
+    local validChests = {}
+    for i = #activeChestsCache, 1, -1 do
+        local item = activeChestsCache[i]
+        if not item or not item.Parent then
+            chestVisitTimers[item] = nil
+            chestVisitCounts[item] = nil
+            table.remove(activeChestsCache, i)
+            continue
+        end
+        if chestVisitCounts[item] and chestVisitCounts[item] >= 2 then continue end
+        local creditedFolder = item:FindFirstChild("Credited")
+        if creditedFolder then
+            local isMyChest = false
+            for _, credit in ipairs(creditedFolder:GetChildren()) do
+                if string.find(string.lower(credit.Name), string.lower(player.Name), 1, true) then
+                    isMyChest = true
+                    break
+                end
+            end
+            if not isMyChest then continue end
+        end
+        local prompt = item:FindFirstChildOfClass("ProximityPrompt") or item:FindFirstChild("ProximityPrompt", true)
+        local targetPart = prompt and (prompt.Parent:IsA("BasePart") and prompt.Parent or item:FindFirstChild("middle") or item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart", true))
+        if prompt and targetPart then
+            table.insert(validChests, {prompt = prompt, model = item, part = targetPart})
+        end
+    end
+    if #validChests == 0 then currentChestIndex = nil return nil end
+    if currentChestIndex and currentChestIndex <= #validChests then
+        local activeSelection = validChests[currentChestIndex]
+        local startTime = chestVisitTimers[activeSelection.model]
+        if startTime and (os.clock() - startTime) < 3 then
+            return activeSelection.prompt, activeSelection.model, activeSelection.part
+        elseif startTime then
+            chestVisitCounts[activeSelection.model] = (chestVisitCounts[activeSelection.model] or 0) + 1
+            chestVisitTimers[activeSelection.model] = nil
+        end
+    end
+    local nextIndex = 1
+    if currentChestIndex then nextIndex = (currentChestIndex % #validChests) + 1 end
+    local loopsChecked = 0
+    while loopsChecked < #validChests do
+        local checkSelection = validChests[nextIndex]
+        if not chestVisitCounts[checkSelection.model] or chestVisitCounts[checkSelection.model] < 2 then break end
+        nextIndex = (nextIndex % #validChests) + 1
+        loopsChecked = loopsChecked + 1
+    end
+    local finalSelection = validChests[nextIndex]
+    if chestVisitCounts[finalSelection.model] and chestVisitCounts[finalSelection.model] >= 2 then
+        currentChestIndex = nil
+        return nil
+    end
+    currentChestIndex = nextIndex
+    chestVisitTimers[finalSelection.model] = os.clock()
+    return finalSelection.prompt, finalSelection.model, finalSelection.part
+end
+
+local function getActiveDragonBall()
+    if not DRAGONBALL_ACTIVE then return nil end
+    local folder = workspace:FindFirstChild("Ignore")
+    if not folder then return nil end
+    for _, obj in ipairs(folder:GetChildren()) do
+        if string.match(obj.Name, "^Dragon Ball %d+$") then
+            local part = obj:IsA("BasePart") and obj or obj:FindFirstChild("Handle") or obj:FindFirstChildWhichIsA("BasePart", true)
+            local prompt = obj:FindFirstChildOfClass("ProximityPrompt") or obj:FindFirstChild("ProximityPrompt", true)
+            if part and prompt then return obj, part, prompt end
+        end
+    end
+    return nil
+end
+
+local function getActiveFarmTarget()
+    local folder = workspace:FindFirstChild("Entities")
+    folder = folder and folder:FindFirstChild("Enemies")
+    if not folder then currentTarget = nil return nil end
+    local list = folder:GetChildren()
+
+    -- Layer 1: Priority (bosses + mobs)
+    for _, m in ipairs(list) do
+        local hrp = m:FindFirstChild("HumanoidRootPart")
+        local hum = hrp and m:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 then
+            local low = m.Name:lower()
+            for k, v in pairs(targets.Bosses) do
+                if v == "PRIORITY" and low:find(k:lower(), 1, true) then currentTarget = m return m end
+            end
+            for k, v in pairs(targets.Mobs) do
+                if v == "PRIORITY" and low:find(k:lower(), 1, true) then currentTarget = m return m end
+            end
+        end
+    end
+
+    -- Layer 2: Regular bosses
+    for _, m in ipairs(list) do
+        local hrp = m:FindFirstChild("HumanoidRootPart")
+        local hum = hrp and m:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 then
+            local low = m.Name:lower()
+            for k, v in pairs(targets.Bosses) do
+                if v == "ON" and low:find(k:lower(), 1, true) then currentTarget = m return m end
+            end
+        end
+    end
+
+    -- Layer 3: Sticky mob
+    if currentTarget and currentTarget.Parent == folder then
+        local hrp = currentTarget:FindFirstChild("HumanoidRootPart")
+        local hum = hrp and currentTarget:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 then
+            local low = currentTarget.Name:lower()
+            for k, v in pairs(targets.Mobs) do
+                if v == "ON" and low:find(k:lower(), 1, true) then return currentTarget end
+            end
+        end
+    end
+
+    -- Layer 4: Standard mobs
+    currentTarget = nil
+    for _, m in ipairs(list) do
+        local hrp = m:FindFirstChild("HumanoidRootPart")
+        local hum = hrp and m:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 then
+            local low = m.Name:lower()
+            for k, v in pairs(targets.Mobs) do
+                if v == "ON" and low:find(k:lower(), 1, true) then currentTarget = m return m end
+            end
+        end
+    end
+    return nil
+end
+
+-- ============================================================================
+-- INSTA KILL ENGINE (mobile-optimized, uses captured format)
+-- ============================================================================
+local function cframeToCastHit(cf)
+    local x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22 = cf:GetComponents()
+    return {x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22}
+end
+
+task.spawn(function()
+    -- Wait for remote
+    while not actionRemote do task.wait(0.25) end
+
+    local interval = 1 / INSTAKILL_RATE
+
+    while true do
+        task.wait(interval)
+
+        if INSTAKILL_ACTIVE and FARMING_ACTIVE then
+            local enemy = currentTarget
+            if enemy and enemy.Parent then
+                local humanoid = enemy:FindFirstChildOfClass("Humanoid")
+                local hrp = enemy:FindFirstChild("HumanoidRootPart")
+                if humanoid and hrp and humanoid.Health > 0 then
+                    -- Cache the payload once per tick
+                    local payload = cframeToCastHit(hrp.CFrame)
+
+                    if USE_PCALL then
+                        pcall(function() actionRemote:FireServer("M1", {password = "Spirit"}) end)
+                        pcall(function() actionRemote:FireServer("M1", {CastHit = payload}) end)
+                    else
+                        actionRemote:FireServer("M1", {password = "Spirit"})
+                        actionRemote:FireServer("M1", {CastHit = payload})
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ============================================================================
+-- MAIN POSITIONING LOOP
+-- ============================================================================
+RunService.RenderStepped:Connect(function()
+    local character = player.Character
+    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+    local myHum = character and character:FindFirstChildOfClass("Humanoid")
+
+    if not myRoot or (myHum and myHum.Health <= 0) then
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+        return
+    end
+
+    -- Auto walk cycle
+    if WALK_ACTIVE and myHum and myHum.Health > 0 then
+        local elapsed = os.clock() - phaseStartTime
+        if elapsed < MOVE_DURATION then
+            myHum:Move(myRoot.CFrame.LookVector, false)
+        elseif elapsed < RESET_TIME then
+            myHum:Move(Vector3.new(0, 0, 0), false)
+        else
+            if not characterResetTriggered then
+                characterResetTriggered = true
+                myHum.Health = 0
+            end
+        end
+    else
+        phaseStartTime = os.clock()
+        characterResetTriggered = false
+    end
+
+    -- Dragon Ball override
+    local dbModel, dbPart = getActiveDragonBall()
+    if dbModel and dbPart then return end
+
+    if FLOWER_ACTIVE then return end
+    if not FARMING_ACTIVE then
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+        currentTarget = nil
+        return
+    end
+
+    -- Chest override
+    local chestPrompt, chestModel, chestMiddlePart = getActiveEventChestPrompt()
+    if chestPrompt and chestModel and chestMiddlePart then
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+        myRoot.CFrame = chestMiddlePart.CFrame * CFrame.new(0, 2, 0)
+        return
+    end
+
+    -- Combat positioning
+    local currentEnemy = getActiveFarmTarget()
+    if currentEnemy and currentEnemy:FindFirstChild("HumanoidRootPart") then
+        local enemyRoot = currentEnemy.HumanoidRootPart
+
+        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+            if flyAnchor then flyAnchor:Destroy() end
+            flyAnchor = Instance.new("BodyVelocity")
+            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+            flyAnchor.Parent = myRoot
+        end
+
+        -- When instakilling, sit inside melee range to guarantee range checks pass
+        if INSTAKILL_ACTIVE then
+            myRoot.CFrame = enemyRoot.CFrame * CFrame.new(0, MELEE_ORBIT_HEIGHT, -MELEE_ORBIT_DIST)
+        else
+            local angleRad = math.rad(currentOffset.X)
+            local orbitY = math.sin(angleRad) * currentOffset.Z + currentOffset.Y
+            local orbitZ = math.cos(angleRad) * currentOffset.Z
+            local worldOffsetPosition = (enemyRoot.CFrame * CFrame.new(0, orbitY, orbitZ)).Position
+            myRoot.CFrame = CFrame.lookAt(worldOffsetPosition, enemyRoot.Position)
+        end
+    else
+        -- Spawn TP fallback
+        if SPAWN_TP_ACTIVE then
+            local spawnsFolder = workspace:FindFirstChild("Entities")
+            spawnsFolder = spawnsFolder and spawnsFolder:FindFirstChild("Spawns")
+            if spawnsFolder then
+                local selectedSpawnPart = nil
+                for k, v in pairs(targets.Bosses) do
+                    if v == "PRIORITY" and spawnMapping[k] and spawnsFolder:FindFirstChild(spawnMapping[k]) then
+                        selectedSpawnPart = spawnsFolder[spawnMapping[k]] break
+                    end
+                end
+                if not selectedSpawnPart then
+                    for k, v in pairs(targets.Mobs) do
+                        if v == "PRIORITY" and spawnMapping[k] and spawnsFolder:FindFirstChild(spawnMapping[k]) then
+                            selectedSpawnPart = spawnsFolder[spawnMapping[k]] break
+                        end
+                    end
+                end
+                if not selectedSpawnPart then
+                    for k, v in pairs(targets.Bosses) do
+                        if v == "ON" and spawnMapping[k] and spawnsFolder:FindFirstChild(spawnMapping[k]) then
+                            selectedSpawnPart = spawnsFolder[spawnMapping[k]] break
+                        end
+                    end
+                end
+                if not selectedSpawnPart then
+                    for k, v in pairs(targets.Mobs) do
+                        if v == "ON" and spawnMapping[k] and spawnsFolder:FindFirstChild(spawnMapping[k]) then
+                            selectedSpawnPart = spawnsFolder[spawnMapping[k]] break
+                        end
+                    end
+                end
+                if selectedSpawnPart and selectedSpawnPart:IsA("BasePart") then
+                    if not flyAnchor or flyAnchor.Parent ~= myRoot then
+                        if flyAnchor then flyAnchor:Destroy() end
+                        flyAnchor = Instance.new("BodyVelocity")
+                        flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                        flyAnchor.Velocity = Vector3.new(0, 0, 0)
+                        flyAnchor.Parent = myRoot
+                    end
+                    myRoot.CFrame = selectedSpawnPart.CFrame * CFrame.new(0, 4, 0)
+                    return
+                end
+            end
+        end
+        if flyAnchor then flyAnchor:Destroy() flyAnchor = nil end
+    end
+end)
+
+-- ============================================================================
+-- FLOWER HARVESTING
+-- ============================================================================
+local FLOWER_DELAY = 1.5
+local function getActiveFlowerTarget()
+    if not FLOWER_ACTIVE then return nil, nil end
+    local folder = workspace:FindFirstChild("Entities")
+    folder = folder and folder:FindFirstChild("Interactions")
+    folder = folder and folder:FindFirstChild("Collectibles")
+    folder = folder and folder:FindFirstChild("Flowers")
+    if not folder then return nil, nil end
+    local flowers = {}
+    for _, v in ipairs(folder:GetDescendants()) do
+        local prompt = v:FindFirstChildOfClass("ProximityPrompt") or v:FindFirstChild("ProximityPrompt", true)
+        if prompt then table.insert(flowers, v) end
+    end
+    table.sort(flowers, function(a, b)
+        local aLily = a.Name:lower():find("lily") ~= nil
+        local bLily = b.Name:lower():find("lily") ~= nil
+        if aLily ~= bLily then return aLily end
+        return a.Name < b.Name
+    end)
+    for _, flower in ipairs(flowers) do
+        local part = flower:IsA("BasePart") and flower or flower:FindFirstChild("Handle") or flower:FindFirstChildWhichIsA("BasePart", true)
+        local prompt = flower:FindFirstChildOfClass("ProximityPrompt") or flower:FindFirstChild("ProximityPrompt", true)
+        if part and prompt and prompt.Parent then return part, prompt end
+    end
+    return nil, nil
+end
+
+task.spawn(function()
+    while true do
+        if FLOWER_ACTIVE then
+            local ok = pcall(function()
+                local flowerPart, flowerPrompt = getActiveFlowerTarget()
+                if flowerPart and flowerPrompt then
+                    local character = player.Character
+                    local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+                    if myRoot then
+                        if not flyAnchor or flyAnchor.Parent ~= myRoot then
+                            if flyAnchor then flyAnchor:Destroy() end
+                            flyAnchor = Instance.new("BodyVelocity")
+                            flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                            flyAnchor.Velocity = Vector3.new(0, 0, 0)
+                            flyAnchor.Parent = myRoot
+                        end
+                        myRoot.CFrame = flowerPart.CFrame + Vector3.new(0, 3, 0)
+                        local startTime = os.clock()
+                        while FLOWER_ACTIVE and (os.clock() - startTime) < FLOWER_DELAY do
+                            if flowerPrompt and flowerPrompt.Parent then
+                                fireproximityprompt(flowerPrompt)
+                            else break end
+                            task.wait(0.1)
+                        end
+                    end
+                else
+                    task.wait(0.5)
+                end
+            end)
+            if not ok then task.wait(0.5) end
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+-- Prompt firing loop (heartbeat, but only fires when needed)
+task.spawn(function()
+    while true do
+        RunService.Heartbeat:Wait()
+
+        if DRAGONBALL_ACTIVE then
+            local dbModel, dbPart, dbPrompt = getActiveDragonBall()
+            if dbModel and dbPart and dbPrompt then
+                local character = player.Character
+                local myRoot = character and character:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    if not flyAnchor or flyAnchor.Parent ~= myRoot then
+                        if flyAnchor then flyAnchor:Destroy() end
+                        flyAnchor = Instance.new("BodyVelocity")
+                        flyAnchor.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                        flyAnchor.Velocity = Vector3.new(0, 0, 0)
+                        flyAnchor.Parent = myRoot
+                    end
+                    myRoot.CFrame = dbPart.CFrame
+                    pcall(function() fireproximityprompt(dbPrompt) end)
+                end
+                continue
+            end
+        end
+
+        if FARMING_ACTIVE and CHEST_ACTIVE then
+            local chestPrompt, chestModel = getActiveEventChestPrompt()
+            if chestPrompt and chestModel then
+                pcall(function() fireproximityprompt(chestPrompt) end)
+            end
+        end
+    end
+end)
+
+-- ============================================================================
+-- AUTO EQUIP / SPELL
+-- ============================================================================
+local function getEntitiesCharacter()
+    local entitiesFolder = workspace:FindFirstChild("Entities")
+    if not entitiesFolder then return nil end
+    local standardChar = player.Character
+    if standardChar and entitiesFolder:FindFirstChild(standardChar.Name) then
+        return entitiesFolder[standardChar.Name]
+    end
+    for _, child in ipairs(entitiesFolder:GetChildren()) do
+        if child:IsA("Model") and string.find(child.Name, "^AiPlayer_") then
+            if child:FindFirstChildOfClass("Humanoid") then return child end
+        end
+    end
+    return nil
+end
+
+task.spawn(function()
+    while not actionRemote do task.wait(0.25) end
+    while true do
+        task.wait(0.5)
+        pcall(function()
+            local myEntity = getEntitiesCharacter()
+            local humanoid = myEntity and myEntity:FindFirstChildOfClass("Humanoid")
+            if not myEntity or not humanoid or humanoid.Health <= 0 then return end
+
+            if WEAPON_ACTIVE then
+                local weaponModel = myEntity:FindFirstChild("Weapon")
+                local grimoireModel = myEntity:FindFirstChild("Grimoire")
+                local beltGrimoireModel = myEntity:FindFirstChild("BeltGrimoire")
+                if not weaponModel then
+                    actionRemote:FireServer("EquipWeapon")
+                    task.wait(0.2)
+                end
+                if beltGrimoireModel and not grimoireModel then
+                    actionRemote:FireServer("Book")
+                    task.wait(0.1)
+                end
+            end
+
+            if SPELL_ACTIVE then
+                local backpack = player:FindFirstChild("Backpack")
+                if backpack then
+                    for _, tool in ipairs(backpack:GetChildren()) do
+                        if tool:IsA("Tool") and tool:GetAttribute("Type") == "Spell" then
+                            tool.Parent = myEntity
+                            task.wait(0.1)
+                        end
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- Character respawn reset
+player.CharacterAdded:Connect(function()
+    phaseStartTime = os.clock()
+    characterResetTriggered = false
+end)
+
+-- Anti-AFK
+local VirtualUser = game:GetService("VirtualUser")
+player.Idled:Connect(function()
+    pcall(function()
+        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    end)
+end)
+
+print("Master Priority Orbital Attacher V6 (Mobile) — Loaded!")
+print("💀 Insta Kill uses: action:FireServer('M1', {password='Spirit'}) + CastHit at enemy position")
+print("⚡ Firing at " .. INSTAKILL_RATE .. " attacks/sec (mobile-tuned)")
